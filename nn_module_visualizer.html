@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>nn.Module — Registration and the Forward Pass — TARA</title>
+<style>
+  :root { --teal:#0E7C7B; --teal-lt:#DCEEED; --coral:#E4572E; --coral-lt:#FBE4DC; --purple:#6C4AB6; --purple-lt:#EAE3F7; --grey:#8A8A8A; --grey-line:#D0D0D0; --bg:#F7F7F7; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI",Arial,sans-serif; margin:0; padding:28px 40px; background:#fff; color:#1A1A1A; }
+  h1 { font-size:24px; margin:0 0 4px 0; }
+  .subtitle { color:var(--grey); font-size:14px; margin-bottom:20px; }
+  .layout { display:flex; gap:28px; align-items:flex-start; }
+
+  .code-panel { flex:1.15; background:#1E1E2E; border-radius:12px; padding:20px; font-family:"Courier New",monospace; font-size:14px; line-height:1.9; color:#D4D4E0; min-height:420px; box-shadow:0 6px 24px rgba(0,0,0,0.12); }
+  .code-line { padding:2px 10px; border-radius:5px; transition:background 0.35s, opacity 0.35s; white-space:pre; border-left:3px solid transparent; }
+  .code-line.active { background:#3A3A5C; box-shadow:0 0 0 1.5px var(--teal); border-left-color:var(--teal); }
+  .code-line.done { opacity:0.5; }
+  .kw { color:#C586C0; } .fn { color:#4EC9B0; } .str{color:#CE9178;} .com{color:#6A9955;} .num{color:#B5CEA8;}
+
+  .registry-panel { flex:1; }
+  .reg-box { background:var(--bg); border:1.5px solid var(--grey-line); border-radius:12px; padding:14px 16px; margin-bottom:14px; transition:border-color 0.3s, box-shadow 0.3s; }
+  .reg-box.highlight-teal { border-color:var(--teal); box-shadow:0 0 0 3px var(--teal-lt); }
+  .reg-box.highlight-purple { border-color:var(--purple); box-shadow:0 0 0 3px var(--purple-lt); }
+  .reg-title { font-weight:bold; font-size:12px; color:var(--grey); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.5px; display:flex; align-items:center; gap:8px; font-family:"Courier New",monospace; }
+  .reg-count { font-size:10px; padding:2px 7px; border-radius:10px; color:#fff; display:none; }
+  .reg-count.teal { background:var(--teal); }
+  .reg-count.purple { background:var(--purple); }
+
+  .dict-created {
+    font-family:"Courier New",monospace; font-size:12px; color:var(--grey);
+    background:#fff; border:1px dashed var(--grey-line); border-radius:6px;
+    padding:5px 9px; margin-bottom:8px; opacity:0; transform:translateY(-4px);
+    transition:all 0.4s ease;
+  }
+  .dict-created.show { opacity:1; transform:translateY(0); }
+
+  .reg-entry { padding:9px 11px; border-radius:8px; margin-bottom:7px; font-family:"Courier New",monospace; font-size:13px; opacity:0; transform:translateX(-10px); transition:all 0.45s cubic-bezier(.2,.8,.2,1); }
+  .reg-entry.show { opacity:1; transform:translateX(0); }
+  .reg-entry.param { background:var(--teal-lt); color:var(--teal); }
+  .reg-entry.module { background:var(--purple-lt); color:var(--purple); font-weight:bold; }
+  .reg-entry .entry-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .reg-entry .detail { color:var(--grey); font-weight:normal; font-size:11px; }
+  .reg-entry .shape-tag { background:#fff; padding:1px 6px; border-radius:4px; font-size:10px; margin-left:4px; border:1px solid var(--grey-line); font-weight:bold; }
+
+  .weight-preview { display:flex; gap:10px; align-items:center; margin-top:7px; }
+  .weight-grid { display:inline-grid; gap:2px; }
+  .weight-cell { width:15px; height:15px; border-radius:2px; }
+  .weight-caption { font-size:10px; color:var(--grey); font-weight:normal; }
+
+  .reg-empty { color:var(--grey); font-style:italic; font-size:12px; padding:5px 2px; }
+  .controls { margin-top:22px; display:flex; gap:12px; align-items:center; }
+  button { font-family:inherit; font-size:14px; padding:9px 18px; border-radius:8px; border:1.5px solid var(--grey-line); background:#fff; cursor:pointer; transition:all 0.2s; }
+  button.primary { background:var(--teal); color:#fff; border:none; font-weight:bold; }
+  button.primary:hover { background:#0a6362; transform:translateY(-1px); }
+  button.coral { background:var(--coral); color:#fff; border:none; font-weight:bold; }
+  button.coral:hover { background:#c94524; }
+  button:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
+  .status { margin-top:10px; font-size:13px; color:var(--teal); font-weight:bold; min-height:36px; background:var(--teal-lt); border-radius:8px; padding:8px 12px; transition:all 0.3s; }
+  .status:empty { background:transparent; padding:0; }
+  .note { margin-top:18px; background:#FFF9E0; border:1.5px solid #FFE01B; border-radius:8px; padding:14px 18px; font-size:13px; font-style:italic; }
+
+  .flow-section { margin-top:24px; padding-top:20px; border-top:1.5px solid var(--grey-line); display:none; }
+  .flow-section.show { display:block; }
+  .flow-title { font-weight:bold; font-size:16px; margin-bottom:4px; }
+  .flow-sub { font-size:12px; color:var(--grey); margin-bottom:14px; max-width:900px; }
+  .flow-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .flow-box { padding:12px 16px; border-radius:10px; font-family:"Courier New",monospace; font-size:13px; font-weight:bold; border:1.5px solid var(--grey-line); background:#fff; color:var(--grey); transition:all 0.35s; text-align:center; }
+  .flow-box .shape { display:block; font-size:10px; font-weight:normal; color:var(--grey); margin-top:3px; }
+  .flow-box.active { background:var(--teal); color:#fff; border-color:var(--teal); transform:scale(1.08); box-shadow:0 4px 14px rgba(14,124,123,0.35); }
+  .flow-box.active .shape { color:#DCEEED; }
+  .flow-box.done { background:var(--teal-lt); color:var(--teal); border-color:var(--teal); }
+  .flow-arrow { color:var(--grey); font-size:18px; }
+  .flow-status { margin-top:14px; font-size:13px; color:var(--teal); font-weight:bold; min-height:20px; background:var(--teal-lt); border-radius:8px; padding:8px 12px; }
+  .flow-status:empty { background:transparent; padding:0; }
+</style>
+</head>
+<body>
+
+<h1>nn.Module — Registration, Then the Forward Pass</h1>
+<div class="subtitle">TARA · Week 2 · Section 1 — step through construction with real weight values, then watch model(x) run through exactly what got registered</div>
+
+<div class="layout">
+  <div class="code-panel" id="codePanel"></div>
+  <div class="registry-panel">
+    <div class="reg-box" id="paramsRegBox">
+      <div class="reg-title">self._parameters <span class="reg-count teal" id="paramsCount">0</span></div>
+      <div class="dict-created" id="paramsDictCreated">_parameters = {}&nbsp;&nbsp;<span style="color:var(--teal)">← created empty, right here</span></div>
+      <div id="paramsBox"><div class="reg-empty">(doesn't exist yet)</div></div>
+    </div>
+    <div class="reg-box" id="modulesRegBox">
+      <div class="reg-title">self._modules <span class="reg-count purple" id="modulesCount">0</span></div>
+      <div class="dict-created" id="modulesDictCreated">_modules = {}&nbsp;&nbsp;<span style="color:var(--purple)">← created empty, right here</span></div>
+      <div id="modulesBox"><div class="reg-empty">(doesn't exist yet)</div></div>
+    </div>
+    <div class="status" id="statusText"></div>
+  </div>
+</div>
+
+<div class="controls">
+  <button class="primary" id="nextBtn">Next line &#9654;</button>
+  <button id="resetBtn">Reset &#8635;</button>
+</div>
+
+<div class="note">
+  Before <code>super().__init__()</code> runs, <code>self._parameters</code> and <code>self._modules</code>
+  don't exist at all — that's WHY it must be the first line. The moment it runs, both dicts are created, empty.
+  Every <code>self.x = ...</code> assignment of a Parameter or a Module after that gets silently filed into one
+  of them by <code>nn.Module.__setattr__</code> — this is the entire mechanism behind
+  <code>optimizer = Adam(model.parameters())</code> finding every learnable number, no matter how deeply nested.
+  The numbers shown for each weight are real samples from PyTorch's default <code>nn.Linear</code> init:
+  uniform in <code>[-1/&radic;in_features, 1/&radic;in_features]</code>.
+</div>
+
+<div class="flow-section" id="flowSection">
+  <div class="flow-title">Now: what happens when you actually call model(x)?</div>
+  <div class="flow-sub">model(x) routes through nn.Module.__call__, which calls forward() — data flows through exactly the modules that just got registered above, in the order forward() uses them, and the shape changes with every registered module.</div>
+  <div class="flow-row" id="flowRow"></div>
+  <div class="flow-status" id="flowStatus"></div>
+  <div class="controls">
+    <button class="coral" id="flowBtn">Run model(x): next step &#9654;</button>
+    <button id="flowResetBtn">Reset flow &#8635;</button>
+  </div>
+</div>
+
+<script>
+  // ---------- deterministic "real" weight sampling (mirrors nn.Linear's default init) ----------
+  function seededRand(seed) {
+    let s = seed >>> 0;
+    return function() {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+  }
+  function makeLinearWeights(outF, inF, seed) {
+    const bound = 1 / Math.sqrt(inF);
+    const rand = seededRand(seed);
+    const w = [];
+    for (let i = 0; i < outF; i++) {
+      const row = [];
+      for (let j = 0; j < inF; j++) row.push((rand() * 2 - 1) * bound);
+      w.push(row);
+    }
+    const b = [];
+    for (let i = 0; i < outF; i++) b.push((rand() * 2 - 1) * bound);
+    return { w, b, bound };
+  }
+  function valColor(v, bound) {
+    const t = Math.max(-1, Math.min(1, v / bound));
+    if (t >= 0) {
+      const r = Math.round(255 - t*(255-14)), g = Math.round(255-t*(255-124)), b = Math.round(255-t*(255-123));
+      return `rgb(${r},${g},${b})`;
+    }
+    const r = 255, g = Math.round(255+t*(255-87)), b = Math.round(255+t*(255-46));
+    return `rgb(${r},${g},${b})`;
+  }
+  function weightGridHTML(matrix, bound, maxRows, maxCols) {
+    const rows = Math.min(matrix.length, maxRows);
+    const cols = Math.min(matrix[0].length, maxCols);
+    let html = `<div class="weight-grid" style="grid-template-columns:repeat(${cols},15px)">`;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        html += `<div class="weight-cell" style="background:${valColor(matrix[r][c], bound)}" title="${matrix[r][c].toFixed(3)}"></div>`;
+      }
+    }
+    html += `</div>`;
+    const truncated = matrix.length > maxRows || matrix[0].length > maxCols;
+    return html + (truncated ? `<span class="weight-caption">(${matrix.length}×${matrix[0].length}, showing ${rows}×${cols})</span>` : `<span class="weight-caption">${matrix.length}×${matrix[0].length}</span>`);
+  }
+  function biasStripHTML(bias, bound) {
+    let html = `<div class="weight-grid" style="grid-template-columns:repeat(${bias.length},15px)">`;
+    bias.forEach(v => { html += `<div class="weight-cell" style="background:${valColor(v, bound)}" title="${v.toFixed(3)}"></div>`; });
+    html += `</div><span class="weight-caption">(${bias.length},)</span>`;
+    return html;
+  }
+
+  const L1 = makeLinearWeights(2, 4, 7);
+  const L2 = makeLinearWeights(1, 2, 42);
+
+  const lines = [
+    { html: '<span class="kw">class</span> <span class="fn">MyModule</span>(nn.Module):', action: null },
+    { html: '    <span class="kw">def</span> <span class="fn">__init__</span>(self):', action: null },
+    { html: '        super().__init__()  <span class="com"># MUST be first</span>', action: 'init' },
+    { html: '        self.linear1 = Linear(<span class="num">4</span>, <span class="num">2</span>)', action: 'module_with_params', name: 'linear1', detail: 'nn.Linear(4→2)',
+      params: [
+        { name: 'linear1.weight', shape: '(2, 4)', detail: '8 learnable numbers', matrix: L1.w, bound: L1.bound },
+        { name: 'linear1.bias', shape: '(2,)', detail: '2 learnable numbers', bias: L1.b, bound: L1.bound }
+      ]
+    },
+    { html: '        self.relu = ReLU()', action: 'module', name: 'relu', detail: 'nn.ReLU (no learnable params)' },
+    { html: '        self.linear2 = Linear(<span class="num">2</span>, <span class="num">1</span>)', action: 'module_with_params', name: 'linear2', detail: 'nn.Linear(2→1)',
+      params: [
+        { name: 'linear2.weight', shape: '(1, 2)', detail: '2 learnable numbers', matrix: L2.w, bound: L2.bound },
+        { name: 'linear2.bias', shape: '(1,)', detail: '1 learnable number', bias: L2.b, bound: L2.bound }
+      ]
+    },
+    { html: '', action: null },
+    { html: '    <span class="kw">def</span> <span class="fn">forward</span>(self, x):', action: null },
+    { html: '        x = self.linear1(x)', action: null },
+    { html: '        x = self.relu(x)', action: null },
+    { html: '        x = self.linear2(x)', action: null },
+    { html: '        <span class="kw">return</span> x', action: null },
+  ];
+
+  const codePanel = document.getElementById('codePanel');
+  const paramsBox = document.getElementById('paramsBox');
+  const modulesBox = document.getElementById('modulesBox');
+  const statusText = document.getElementById('statusText');
+  const nextBtn = document.getElementById('nextBtn');
+
+  let idx = 0, paramCount = 0, moduleCount = 0;
+
+  function renderCode() {
+    codePanel.innerHTML = lines.map((l, i) => {
+      let cls = 'code-line';
+      if (i < idx) cls += ' done';
+      if (i === idx) cls += ' active';
+      return `<div class="${cls}">${l.html || '&nbsp;'}</div>`;
+    }).join('');
+  }
+
+  function addModuleEntry(name, detail) {
+    if (modulesBox.querySelector('.reg-empty')) modulesBox.innerHTML = '';
+    const el = document.createElement('div');
+    el.className = 'reg-entry module';
+    el.innerHTML = `<div class="entry-head"><span>"${name}"</span><span class="detail">${detail}</span></div>`;
+    modulesBox.appendChild(el);
+    requestAnimationFrame(() => setTimeout(() => el.classList.add('show'), 30));
+    moduleCount++;
+    const mc = document.getElementById('modulesCount');
+    mc.style.display = 'inline'; mc.textContent = moduleCount;
+    flashBox('modulesRegBox', 'highlight-purple');
+  }
+
+  function addParamEntry(p) {
+    if (paramsBox.querySelector('.reg-empty')) paramsBox.innerHTML = '';
+    const el = document.createElement('div');
+    el.className = 'reg-entry param';
+    const grid = p.matrix ? weightGridHTML(p.matrix, p.bound, 4, 8) : biasStripHTML(p.bias, p.bound);
+    el.innerHTML = `
+      <div class="entry-head"><span>"${p.name}" <span class="shape-tag">${p.shape}</span></span><span class="detail">${p.detail}</span></div>
+      <div class="weight-preview">${grid}</div>`;
+    paramsBox.appendChild(el);
+    requestAnimationFrame(() => setTimeout(() => el.classList.add('show'), 30));
+    paramCount++;
+    const pc = document.getElementById('paramsCount');
+    pc.style.display = 'inline'; pc.textContent = paramCount;
+    flashBox('paramsRegBox', 'highlight-teal');
+  }
+
+  function flashBox(id, cls) {
+    const box = document.getElementById(id);
+    box.classList.add(cls);
+    setTimeout(() => box.classList.remove(cls), 900);
+  }
+
+  function step() {
+    if (idx >= lines.length) return;
+    const l = lines[idx];
+
+    if (l.action === 'init') {
+      document.getElementById('paramsDictCreated').classList.add('show');
+      document.getElementById('modulesDictCreated').classList.add('show');
+      paramsBox.innerHTML = '<div class="reg-empty">(empty — nothing registered yet)</div>';
+      modulesBox.innerHTML = '<div class="reg-empty">(empty — nothing registered yet)</div>';
+      statusText.textContent = 'super().__init__() runs first — _parameters = {} and _modules = {} are created, both empty. Only now can self.x = ... register anything.';
+      flashBox('paramsRegBox', 'highlight-teal');
+      flashBox('modulesRegBox', 'highlight-purple');
+    } else if (l.action === 'module_with_params') {
+      addModuleEntry(l.name, l.detail);
+      l.params.forEach((p, i) => setTimeout(() => addParamEntry(p), 220 + i * 320));
+      const totalNums = l.params.reduce((s, p) => {
+        if (p.matrix) return s + p.matrix.length * p.matrix[0].length;
+        return s + p.bias.length;
+      }, 0);
+      statusText.innerHTML = `self.${l.name} = Linear(...) → the Linear itself is registered into _modules. Inside its own __init__, it creates <b>weight</b> and <b>bias</b> as nn.Parameter — those register into <b>this module's</b> _parameters (${totalNums} real numbers, sampled here).`;
+    } else if (l.action === 'module') {
+      addModuleEntry(l.name, l.detail);
+      statusText.textContent = `self.${l.name} → registered into _modules. ReLU has no weights, so nothing is added to _parameters.`;
+    } else if (idx === 8) {
+      statusText.textContent = 'Construction done. forward() defines HOW data flows through what just got registered — it does not register anything new itself.';
+    } else {
+      statusText.textContent = '';
+    }
+
+    idx++;
+    renderCode();
+    if (idx >= lines.length) {
+      nextBtn.disabled = true; nextBtn.textContent = 'Done ✓';
+      statusText.innerHTML = `.parameters() finds all <b>${paramCount} parameter tensors</b> by walking _modules recursively — that's how one optimizer call reaches every weight, no matter how deeply nested. Scroll down — see model(x) actually run.`;
+      document.getElementById('flowSection').classList.add('show');
+    }
+  }
+
+  function reset() {
+    idx = 0; paramCount = 0; moduleCount = 0;
+    paramsBox.innerHTML = '<div class="reg-empty">(doesn\'t exist yet)</div>';
+    modulesBox.innerHTML = '<div class="reg-empty">(doesn\'t exist yet)</div>';
+    document.getElementById('paramsDictCreated').classList.remove('show');
+    document.getElementById('modulesDictCreated').classList.remove('show');
+    document.getElementById('paramsCount').style.display = 'none';
+    document.getElementById('modulesCount').style.display = 'none';
+    statusText.textContent = '';
+    nextBtn.disabled = false; nextBtn.textContent = 'Next line ▶';
+    document.getElementById('flowSection').classList.remove('show');
+    renderCode();
+    resetFlow();
+  }
+
+  document.getElementById('nextBtn').addEventListener('click', step);
+  document.getElementById('resetBtn').addEventListener('click', reset);
+
+  // --- forward-pass flow, now shape-annotated ---
+  const flowSteps = [
+    { name: 'x', shape: '(batch, 4)', detail: 'input tensor' },
+    { name: 'self.linear1(x)', shape: '(batch, 2)', detail: 'registered module #1 — matmul with linear1.weight (2×4) + linear1.bias — shape 4 → 2' },
+    { name: 'self.relu(x)', shape: '(batch, 2)', detail: 'registered module #2 — zero out negatives elementwise, shape unchanged, no params used' },
+    { name: 'self.linear2(x)', shape: '(batch, 1)', detail: 'registered module #3 — matmul with linear2.weight (1×2) + linear2.bias — shape 2 → 1' },
+    { name: 'return x', shape: '(batch, 1)', detail: 'output' },
+  ];
+  let flowIdx = 0;
+  const flowRow = document.getElementById('flowRow');
+  const flowStatus = document.getElementById('flowStatus');
+
+  function renderFlow() {
+    flowRow.innerHTML = '';
+    flowSteps.forEach((f, i) => {
+      const box = document.createElement('div');
+      box.className = 'flow-box';
+      if (i < flowIdx) box.classList.add('done');
+      if (i === flowIdx) box.classList.add('active');
+      box.innerHTML = `${f.name}<span class="shape">${f.shape}</span>`;
+      flowRow.appendChild(box);
+      if (i < flowSteps.length - 1) {
+        const arrow = document.createElement('div');
+        arrow.className = 'flow-arrow';
+        arrow.textContent = '→';
+        flowRow.appendChild(arrow);
+      }
+    });
+  }
+
+  function flowStep() {
+    if (flowIdx >= flowSteps.length - 1) return;
+    flowIdx++;
+    renderFlow();
+    flowStatus.textContent = flowSteps[flowIdx].detail;
+    if (flowIdx >= flowSteps.length - 1) { document.getElementById('flowBtn').disabled = true; document.getElementById('flowBtn').textContent = 'Done ✓'; }
+  }
+  function resetFlow() {
+    flowIdx = 0;
+    flowStatus.textContent = '';
+    document.getElementById('flowBtn').disabled = false;
+    document.getElementById('flowBtn').textContent = 'Run model(x): next step ▶';
+    renderFlow();
+  }
+  document.getElementById('flowBtn').addEventListener('click', flowStep);
+  document.getElementById('flowResetBtn').addEventListener('click', resetFlow);
+
+  reset();
+</script>
+
+</body>
+</html>

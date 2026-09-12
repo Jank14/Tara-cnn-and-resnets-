@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Curve Fitting: Finding the Best Line — TARA</title>
+<style>
+  :root { --teal:#0E7C7B; --coral:#E4572E; --purple:#6C4AB6; --grey:#8A8A8A; --grey-line:#D8D8D8; --bg:#F7F7F7; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI",Arial,sans-serif; margin:0; padding:24px 36px; background:#fff; color:#1A1A1A; }
+  h1 { font-size:22px; margin:0 0 2px 0; }
+  .subtitle { color:var(--grey); font-size:13px; margin-bottom:18px; }
+  .layout { display:flex; gap:24px; align-items:flex-start; }
+  .chart-col { flex:1.5; }
+  .side-col { flex:1; min-width:290px; }
+  svg { background:var(--bg); border-radius:10px; border:1.5px solid var(--grey-line); }
+  .slider-row { margin-bottom:14px; }
+  .slider-row label { display:flex; justify-content:space-between; font-size:12.5px; font-weight:bold; margin-bottom:4px; }
+  .slider-row .val { font-family:"Courier New",monospace; color:var(--teal); }
+  input[type=range] { width:100%; accent-color:var(--teal); }
+  .metric-box { background:var(--bg); border-radius:10px; padding:12px 16px; border:1.5px solid var(--grey-line); margin-top:8px; }
+  .metric-box .lbl { font-size:11px; color:var(--grey); text-transform:uppercase; letter-spacing:0.5px; }
+  .metric-box .val { font-family:"Courier New",monospace; font-size:22px; font-weight:bold; color:var(--coral); }
+  .metric-box .val.good { color:var(--teal); }
+  button { font-family:inherit; font-size:13.5px; padding:9px 18px; border-radius:8px; border:1.5px solid var(--grey-line); background:#fff; cursor:pointer; margin-right:8px; margin-top:6px; }
+  button.primary { background:var(--coral); color:#fff; border:none; font-weight:bold; }
+  button.primary:hover { background:#c94524; }
+  button:disabled { opacity:0.5; cursor:not-allowed; }
+  .note { margin-top:14px; background:#FFF9E0; border:1.5px solid #FFE01B; border-radius:8px; padding:12px 15px; font-size:12px; font-style:italic; }
+  .loss-history { font-family:"Courier New",monospace; font-size:11px; color:var(--grey); margin-top:8px; max-height:80px; overflow-y:auto; }
+</style>
+</head>
+<body>
+
+<h1>Curve Fitting: Watching Gradient Descent Find the Best Line</h1>
+<div class="subtitle">TARA · Week 2 · Fundamentals — same mid-parent-height data as the deck. Drag manually, or let gradient descent find W and b on its own.</div>
+
+<div class="layout">
+  <div class="chart-col">
+    <svg id="chart" width="660" height="460" viewBox="0 0 660 460"></svg>
+  </div>
+  <div class="side-col">
+    <div class="slider-row">
+      <label>W (slope) <span class="val" id="wVal">-0.40</span></label>
+      <input type="range" id="wSlider" min="-1" max="2" step="0.01" value="-0.4">
+    </div>
+    <div class="slider-row">
+      <label>b (intercept) <span class="val" id="bVal">8.0</span></label>
+      <input type="range" id="bSlider" min="0" max="80" step="0.5" value="8">
+    </div>
+    <div class="metric-box">
+      <div class="lbl">Loss (mean squared error)</div>
+      <div class="val" id="lossVal">—</div>
+    </div>
+    <button class="primary" id="runBtn">▶ Run Gradient Descent</button>
+    <button id="resetBtn">↺ Reset to Random Start</button>
+    <div class="loss-history" id="lossHistory"></div>
+    <div class="note" id="note">Drag W or b manually and watch the line move and the loss change. Or click "Run Gradient Descent" to watch it find the best fit on its own — one small step at a time, always moving in the direction that reduces the loss the fastest.</div>
+  </div>
+</div>
+
+<script>
+  const pts = [
+    { x: 64, y: 64 }, { x: 65, y: 68 }, { x: 66, y: 65 }, { x: 67, y: 70 }, { x: 68, y: 67 },
+    { x: 69, y: 71 }, { x: 70, y: 69 }, { x: 70, y: 74 }, { x: 71, y: 73 }, { x: 72, y: 70 },
+    { x: 73, y: 74 }, { x: 74, y: 71 }, { x: 75, y: 75 }, { x: 76, y: 73 },
+  ];
+  const W = 660, H = 460, padL = 50, padB = 40, padT = 20, padR = 20;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const xMin = 62, xMax = 78, yMin = 55, yMax = 85;
+  const sx = (v) => padL + ((v - xMin) / (xMax - xMin)) * plotW;
+  const sy = (v) => (H - padB) - ((v - yMin) / (yMax - yMin)) * plotH;
+
+  function mse(w, b) {
+    let s = 0;
+    pts.forEach((p) => { const pred = w * p.x + b; s += (pred - p.y) ** 2; });
+    return s / pts.length;
+  }
+  function grad(w, b) {
+    let dw = 0, db = 0;
+    pts.forEach((p) => {
+      const err = (w * p.x + b) - p.y;
+      dw += 2 * err * p.x;
+      db += 2 * err;
+    });
+    return [dw / pts.length, db / pts.length];
+  }
+
+  let w = -0.4, b = 8;
+  let running = false;
+  let lossHist = [];
+
+  function drawAxes() {
+    let s = `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H-padB}" stroke="#D8D8D8" stroke-width="1.5"/>`;
+    s += `<line x1="${padL}" y1="${H-padB}" x2="${W-padR}" y2="${H-padB}" stroke="#D8D8D8" stroke-width="1.5"/>`;
+    for (let t = xMin; t <= xMax; t += 4) s += `<text x="${sx(t)}" y="${H-padB+16}" text-anchor="middle" font-size="10" fill="#8A8A8A">${t}</text>`;
+    for (let t = yMin; t <= yMax; t += 5) s += `<text x="${padL-8}" y="${sy(t)+4}" text-anchor="end" font-size="10" fill="#8A8A8A">${t}</text>`;
+    s += `<text x="${W/2}" y="${H-6}" text-anchor="middle" font-size="11" fill="#8A8A8A">mid-parent height (in)</text>`;
+    s += `<text x="14" y="${padT-4}" font-size="11" fill="#8A8A8A">child height (in)</text>`;
+    return s;
+  }
+
+  function render() {
+    document.getElementById('wVal').textContent = w.toFixed(2);
+    document.getElementById('bVal').textContent = b.toFixed(1);
+    document.getElementById('wSlider').value = Math.max(-1, Math.min(2, w));
+    document.getElementById('bSlider').value = Math.max(0, Math.min(80, b));
+    let svgHtml = drawAxes();
+    // residual lines (dashed grey, from each point to the line)
+    pts.forEach((p) => {
+      const predY = w * p.x + b;
+      svgHtml += `<line x1="${sx(p.x)}" y1="${sy(p.y)}" x2="${sx(p.x)}" y2="${sy(predY)}" stroke="#C0C0C0" stroke-width="1" stroke-dasharray="2,2"/>`;
+    });
+    // fit line
+    const y1 = w * xMin + b, y2 = w * xMax + b;
+    svgHtml += `<line x1="${sx(xMin)}" y1="${sy(y1)}" x2="${sx(xMax)}" y2="${sy(y2)}" stroke="#E4572E" stroke-width="3"/>`;
+    // points
+    pts.forEach((p) => { svgHtml += `<circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="5" fill="#0E7C7B" opacity="0.85" stroke="#fff" stroke-width="1"/>`; });
+    document.getElementById('chart').innerHTML = svgHtml;
+    const loss = mse(w, b);
+    const lossEl = document.getElementById('lossVal');
+    lossEl.textContent = loss.toFixed(2);
+    lossEl.className = 'val' + (loss < 6 ? ' good' : '');
+  }
+
+  document.getElementById('wSlider').addEventListener('input', (e) => { w = parseFloat(e.target.value); render(); });
+  document.getElementById('bSlider').addEventListener('input', (e) => { b = parseFloat(e.target.value); render(); });
+
+  function randomStart() {
+    w = (Math.random() * 2 - 0.5);
+    b = Math.random() * 60 + 5;
+    document.getElementById('wSlider').value = w;
+    document.getElementById('bSlider').value = b;
+    lossHist = [];
+    document.getElementById('lossHistory').innerHTML = '';
+    render();
+  }
+
+  document.getElementById('resetBtn').addEventListener('click', () => { randomStart(); });
+
+  document.getElementById('runBtn').addEventListener('click', () => {
+    if (running) return;
+    running = true;
+    const btn = document.getElementById('runBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Running…';
+    const lr_w = 0.0000045, lr_b = 0.0022;
+    let step = 0;
+    const maxSteps = 220;
+    const interval = setInterval(() => {
+      const [dw, db] = grad(w, b);
+      w -= lr_w * dw;
+      b -= lr_b * db;
+      step++;
+      if (step % 5 === 0 || step === 1) {
+        const loss = mse(w, b);
+        lossHist.push(`step ${step}: loss = ${loss.toFixed(2)}`);
+        if (lossHist.length > 12) lossHist.shift();
+        document.getElementById('lossHistory').innerHTML = lossHist.join('<br>');
+      }
+      render();
+      if (step >= maxSteps) {
+        clearInterval(interval);
+        running = false;
+        btn.disabled = false;
+        btn.textContent = '▶ Run Gradient Descent';
+        document.getElementById('note').textContent = 'Done — ' + maxSteps + ' steps. Notice W and b moved fast at first (loss was high, gradient was steep) and slowed down as they approached the best fit (gradient flattens out near the minimum). That slowing-down IS the gradient shrinking as loss shrinks.';
+      }
+    }, 25);
+  });
+
+  render();
+</script>
+
+</body>
+</html>

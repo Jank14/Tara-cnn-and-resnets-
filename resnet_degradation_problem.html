@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>The Problem ResNets Solve — TARA</title>
+<style>
+  :root { --teal:#0E7C7B; --teal-lt:#DCEEED; --coral:#E4572E; --coral-lt:#FBE4DC; --purple:#6C4AB6; --grey:#8A8A8A; --grey-line:#D0D0D0; --bg:#F7F7F7; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI",Arial,sans-serif; margin:0; padding:26px 40px; background:#fff; color:#1A1A1A; }
+  h1 { font-size:26px; margin:0 0 4px 0; }
+  .subtitle { color:var(--grey); font-size:14px; margin-bottom:22px; }
+  .stage {
+    font-size:15px; font-weight:bold; margin-bottom:16px; padding:12px 18px; border-radius:10px;
+    background:var(--bg); display:inline-block; border: 1.5px solid var(--grey-line);
+    transition: all 0.3s;
+  }
+  .stage.done { background: var(--teal-lt); border-color: var(--teal); color: var(--teal); }
+  canvas { border:1.5px solid var(--grey-line); border-radius:10px; background:#FAFAFA; }
+  .controls { margin-top:20px; display:flex; gap:12px; align-items:center; }
+  button {
+    font-family:inherit; font-size:15px; padding:10px 22px; border-radius:8px;
+    border:1.5px solid var(--grey-line); background:#fff; cursor:pointer; transition:all 0.2s;
+  }
+  button.primary { background:var(--teal); color:#fff; border:none; font-weight:bold; }
+  button.primary:hover { background:#0a6362; transform:translateY(-1px); box-shadow:0 2px 8px rgba(14,124,123,0.3); }
+  button:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
+  .legend { display:flex; gap:28px; margin-top:16px; font-size:14px; font-weight:500; }
+  .legend span { display:flex; align-items:center; gap:8px; }
+  .sw { width:28px; height:4px; display:inline-block; border-radius:2px; }
+  .readout { display:flex; gap:20px; margin-top:18px; flex-wrap:wrap; }
+  .stat {
+    background:var(--bg); border-radius:10px; padding:14px 22px; text-align:center; min-width:200px;
+    border: 1.5px solid var(--grey-line); transition: all 0.3s;
+  }
+  .stat.highlight { border-color: var(--teal); box-shadow: 0 0 0 3px var(--teal-lt); }
+  .stat .lbl { font-size:12px; color:var(--grey); margin-bottom:6px; }
+  .stat .val { font-family:"Courier New",monospace; font-size:24px; font-weight:bold; }
+  .insight {
+    margin-top:20px; padding:14px 18px; border-radius:10px; font-size:15px; font-weight:bold;
+    display:none; animation: fadeIn 0.5s ease;
+  }
+  .insight.show { display:block; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  .insight.bad { background:var(--coral-lt); color:var(--coral); border: 1.5px solid var(--coral); }
+  .insight.good { background:var(--teal-lt); color:var(--teal); border: 1.5px solid var(--teal); }
+  .note {
+    margin-top:22px; background:#FFF9E0; border:1.5px solid #FFE01B; border-radius:8px;
+    padding:14px 18px; font-size:14px; font-style:italic; max-width:950px;
+  }
+</style>
+</head>
+<body>
+
+<h1>The Problem ResNets Solve — Watch It Happen</h1>
+<div class="subtitle">TARA · Week 2 · Section 4 — three networks, same task, watch training error over time</div>
+
+<div class="stage" id="stageLabel">Click "Train" to start all three networks</div>
+
+<canvas id="chart" width="950" height="360"></canvas>
+
+<div class="legend">
+  <span><span class="sw" style="background:#8A8A8A"></span>20-layer plain network</span>
+  <span><span class="sw" style="background:var(--coral)"></span>56-layer plain network — deeper, but WORSE</span>
+  <span><span class="sw" style="background:var(--teal)"></span>56-layer ResNet — deeper AND better</span>
+</div>
+
+<div class="readout">
+  <div class="stat" id="stat20"><div class="lbl">20-layer plain</div><div class="val" id="v20" style="color:#8A8A8A">—</div></div>
+  <div class="stat" id="stat56p"><div class="lbl">56-layer plain</div><div class="val" id="v56p" style="color:#E4572E">—</div></div>
+  <div class="stat" id="stat56r"><div class="lbl">56-layer ResNet</div><div class="val" id="v56r" style="color:#0E7C7B">—</div></div>
+</div>
+
+<div class="insight bad" id="insightBad">
+  The 56-layer PLAIN network is WORSE than the 20-layer one — despite being strictly more expressive on paper.
+</div>
+<div class="insight good" id="insightGood">
+  Add skip connections to the same 56 layers, change nothing else → it becomes the best of all three. Depth is an advantage again.
+</div>
+
+<div class="controls">
+  <button class="primary" id="trainBtn">Train &#9654;</button>
+  <button id="resetBtn">Reset &#8635;</button>
+</div>
+
+<div class="note">
+  This replicates He et al.'s 2015 result (<b>training</b> error, not test — ruling out overfitting).
+  The deeper plain network can't find "do nothing extra" as a solution unaided. Skip connections make that the
+  default starting point, so gradient descent just needs to find small improvements on top.
+</div>
+
+<script>
+  const canvas = document.getElementById('chart');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const padL=60, padB=44, padT=24, padR=24;
+  const plotW = W-padL-padR, plotH = H-padT-padB;
+  const EPOCHS = 40;
+
+  function plain20(e) { return 0.55*Math.exp(-e/9) + 0.09 + 0.01*Math.sin(e/2)*Math.exp(-e/20); }
+  function plain56(e) { return 0.6*Math.exp(-e/14) + 0.19 + 0.025*Math.sin(e/1.6)*Math.exp(-e/30); }
+  function resnet56(e) { return 0.55*Math.exp(-e/7) + 0.045 + 0.006*Math.sin(e/2)*Math.exp(-e/15); }
+
+  function drawAxes() {
+    ctx.clearRect(0,0,W,H);
+    // Grid lines
+    ctx.strokeStyle = '#F0F0F0'; ctx.lineWidth=1;
+    [0,0.1,0.2,0.3,0.4,0.5,0.6].forEach(v => {
+      const y = padT + plotH*(1-v/0.65);
+      ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+    });
+    // Axes
+    ctx.strokeStyle = '#D0D0D0'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(padL,padT); ctx.lineTo(padL,H-padB); ctx.lineTo(W-padR,H-padB); ctx.stroke();
+    // Labels
+    ctx.fillStyle = '#8A8A8A'; ctx.font='12px -apple-system, Arial';
+    [0,0.2,0.4,0.6].forEach(v => {
+      const y = padT + plotH*(1-v/0.65);
+      ctx.fillText(v.toFixed(1), 16, y+4);
+    });
+    ctx.fillText('training error', 8, padT-8);
+    ctx.fillText('epoch', W-padR-35, H-8);
+    [0,10,20,30,40].forEach(e => {
+      ctx.fillText(e, padL + plotW*(e/EPOCHS)-6, H-padB+18);
+    });
+  }
+
+  function plotCurve(fn, upToEpoch, color, lineWidth) {
+    ctx.strokeStyle = color; ctx.lineWidth = lineWidth || 3; ctx.beginPath();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (let e=0; e<=upToEpoch; e+=0.5) {
+      const x = padL + plotW*(e/EPOCHS);
+      const y = padT + plotH*(1 - Math.min(0.65,fn(e))/0.65);
+      if (e===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+    // Endpoint dot
+    if (upToEpoch > 0) {
+      const x = padL + plotW*(upToEpoch/EPOCHS);
+      const y = padT + plotH*(1 - Math.min(0.65,fn(upToEpoch))/0.65);
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(x,y,5,0,7); ctx.fill();
+      // Glow
+      ctx.beginPath(); ctx.arc(x,y,10,0,7);
+      ctx.fillStyle = color.replace(')', ',0.15)').replace('rgb','rgba');
+      if (!color.startsWith('rgba')) { ctx.globalAlpha = 0.3; ctx.fill(); ctx.globalAlpha = 1; }
+    }
+  }
+
+  let epoch = 0, playing = false;
+  const stageLabel = document.getElementById('stageLabel');
+
+  function render() {
+    drawAxes();
+    plotCurve(plain20, epoch, '#8A8A8A', 2.5);
+    plotCurve(plain56, epoch, '#E4572E', 3);
+    plotCurve(resnet56, epoch, '#0E7C7B', 3);
+    if (epoch >= EPOCHS) {
+      document.getElementById('v20').textContent = plain20(EPOCHS).toFixed(3);
+      document.getElementById('v56p').textContent = plain56(EPOCHS).toFixed(3);
+      document.getElementById('v56r').textContent = resnet56(EPOCHS).toFixed(3);
+      stageLabel.textContent = 'Done — the deeper plain network is WORSE. The ResNet is BEST.';
+      stageLabel.classList.add('done');
+      document.getElementById('stat56r').classList.add('highlight');
+      document.getElementById('insightBad').classList.add('show');
+      document.getElementById('insightGood').classList.add('show');
+    } else if (epoch > 0) {
+      stageLabel.textContent = `Training... epoch ${epoch} of ${EPOCHS}`;
+    }
+  }
+
+  function train() {
+    if (playing) return;
+    playing = true;
+    document.getElementById('trainBtn').disabled = true;
+    const interval = setInterval(() => {
+      epoch++;
+      render();
+      if (epoch >= EPOCHS) { clearInterval(interval); playing = false; }
+    }, 80);
+  }
+
+  function reset() {
+    epoch = 0; playing = false;
+    document.getElementById('trainBtn').disabled = false;
+    ['v20','v56p','v56r'].forEach(id => document.getElementById(id).textContent = '—');
+    stageLabel.textContent = 'Click "Train" to start all three networks';
+    stageLabel.classList.remove('done');
+    document.getElementById('stat56r').classList.remove('highlight');
+    document.getElementById('insightBad').classList.remove('show');
+    document.getElementById('insightGood').classList.remove('show');
+    render();
+  }
+
+  document.getElementById('trainBtn').addEventListener('click', train);
+  document.getElementById('resetBtn').addEventListener('click', reset);
+  reset();
+</script>
+
+</body>
+</html>

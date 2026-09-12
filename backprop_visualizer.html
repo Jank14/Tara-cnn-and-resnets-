@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Backprop, One Number at a Time — TARA</title>
+<style>
+  :root { --teal:#0E7C7B; --teal-lt:#DCEEED; --coral:#E4572E; --coral-lt:#FBE4DC; --purple:#6C4AB6; --grey:#8A8A8A; --grey-line:#D0D0D0; --bg:#F7F7F7; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI",Arial,sans-serif; margin:0; padding:26px 40px; background:#fff; color:#1A1A1A; }
+  h1 { font-size:26px; margin:0 0 4px 0; }
+  .subtitle { color:var(--grey); font-size:14px; margin-bottom:24px; }
+
+  .param-bar {
+    display: flex; gap: 20px; align-items: center; margin-bottom: 20px;
+    padding: 12px 16px; background: var(--bg); border-radius: 10px; border: 1.5px solid var(--grey-line);
+    flex-wrap: wrap;
+  }
+  .param-item { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+  .param-item label { font-weight: bold; font-family: "Courier New", monospace; min-width: 55px; }
+  .param-item input[type=range] { width: 100px; accent-color: var(--teal); }
+  .param-item .pval { font-family: "Courier New", monospace; font-weight: bold; min-width: 40px; }
+
+  .phase-label {
+    font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 6px 16px; border-radius: 8px; display: inline-block; margin-bottom: 12px;
+    transition: all 0.3s;
+  }
+  .phase-forward { background: var(--teal-lt); color: var(--teal); }
+  .phase-backward { background: var(--coral-lt); color: var(--coral); }
+
+  svg { overflow: visible; }
+
+  .controls { margin-top: 20px; display: flex; gap: 12px; align-items: center; }
+  button {
+    font-family: inherit; font-size: 15px; padding: 9px 20px; border-radius: 8px;
+    border: 1.5px solid var(--grey-line); background: #fff; cursor: pointer;
+    transition: all 0.2s;
+  }
+  button.primary { background: var(--teal); color: #fff; border: none; font-weight: bold; }
+  button.primary:hover { background: #0a6362; transform: translateY(-1px); box-shadow: 0 2px 8px rgba(14,124,123,0.3); }
+  button.coral { background: var(--coral); color: #fff; border: none; font-weight: bold; }
+  button:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+  .status {
+    margin-top: 14px; font-size: 16px; color: var(--teal); font-weight: bold; min-height: 28px;
+    padding: 10px 14px; background: var(--bg); border-radius: 8px;
+    transition: background 0.3s;
+  }
+  .status.backward-active { background: var(--coral-lt); color: var(--coral); }
+  .formula { font-family: "Courier New", monospace; font-size: 14px; color: var(--grey); margin-top: 6px; min-height: 20px; }
+
+  .note {
+    margin-top: 22px; background: #FFF9E0; border: 1.5px solid #FFE01B; border-radius: 8px;
+    padding: 14px 18px; font-size: 14px; font-style: italic; max-width: 950px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Backprop, One Number at a Time</h1>
+<div class="subtitle">TARA · Week 2 · Section 2 — a tiny 2-layer chain: x → (×w1) → h → (×w2) → y, compared against a target</div>
+
+<div class="param-bar">
+  <div class="param-item">
+    <label>x =</label>
+    <input type="range" min="0.5" max="4" step="0.1" value="2.0" id="pX">
+    <span class="pval" id="pvX">2.0</span>
+  </div>
+  <div class="param-item">
+    <label>w1 =</label>
+    <input type="range" min="0.1" max="3" step="0.1" value="1.5" id="pW1">
+    <span class="pval" id="pvW1">1.5</span>
+  </div>
+  <div class="param-item">
+    <label>w2 =</label>
+    <input type="range" min="0.1" max="3" step="0.1" value="0.8" id="pW2">
+    <span class="pval" id="pvW2">0.8</span>
+  </div>
+  <div class="param-item">
+    <label>target =</label>
+    <input type="range" min="1" max="8" step="0.5" value="5.0" id="pT">
+    <span class="pval" id="pvT">5.0</span>
+  </div>
+</div>
+
+<div id="phaseLabel" class="phase-label phase-forward">Forward pass</div>
+
+<svg id="diagram" width="1000" height="240" viewBox="0 0 1000 240"></svg>
+
+<div class="status" id="statusText">Click "Step" to compute x → h</div>
+<div class="formula" id="formulaText"></div>
+
+<div class="controls">
+  <button class="primary" id="stepBtn">Step &#9654;</button>
+  <button id="resetBtn">Reset &#8635;</button>
+</div>
+
+<div class="note">
+  <b>Forward</b> (teal): plug numbers in left to right, computing each node — this is <code>model(x)</code>.<br>
+  <b>Backward</b> (coral): once we know the loss, walk back RIGHT TO LEFT, multiplying by the local
+  derivative at each step — this is exactly the chain rule, and it's <em>all</em> <code>loss.backward()</code> is doing.
+  Every backward number = previous backward number × one local slope — nothing more exotic than repeated multiplication.
+</div>
+
+<script>
+  let x, w1, w2, target;
+  let h, y, loss, dL_dy, dL_dh, dL_dw2, dL_dw1;
+
+  function readParams() {
+    x = parseFloat(document.getElementById('pX').value);
+    w1 = parseFloat(document.getElementById('pW1').value);
+    w2 = parseFloat(document.getElementById('pW2').value);
+    target = parseFloat(document.getElementById('pT').value);
+    document.getElementById('pvX').textContent = x.toFixed(1);
+    document.getElementById('pvW1').textContent = w1.toFixed(1);
+    document.getElementById('pvW2').textContent = w2.toFixed(1);
+    document.getElementById('pvT').textContent = target.toFixed(1);
+  }
+
+  // Bind param sliders to reset
+  ['pX','pW1','pW2','pT'].forEach(id => {
+    document.getElementById(id).addEventListener('input', () => { readParams(); doReset(); });
+  });
+
+  const nodes = [
+    { id:'x', x:80,  y:110, label:'x (input)' },
+    { id:'h', x:320, y:110, label:'h = x·w1' },
+    { id:'y', x:560, y:110, label:'y = h·w2' },
+    { id:'L', x:830, y:110, label:'L = (y−target)²' },
+  ];
+  const edges = [
+    { from:'x', to:'h' },
+    { from:'h', to:'y' },
+    { from:'y', to:'L' },
+  ];
+
+  const svgEl = document.getElementById('diagram');
+  const statusText = document.getElementById('statusText');
+  const formulaText = document.getElementById('formulaText');
+  const phaseLabel = document.getElementById('phaseLabel');
+
+  let values, grads, idx;
+
+  function getSteps() {
+    return [
+      { phase:'forward', run: () => { values.h = x*w1; } },
+      { phase:'forward', run: () => { values.y = values.h*w2; } },
+      { phase:'forward', run: () => { values.L = (values.y - target)**2; } },
+      { phase:'backward', run: () => { grads.y = 2*(values.y-target); } },
+      { phase:'backward', run: () => { grads.h = grads.y * w2; } },
+      { phase:'backward', run: () => { grads.w1 = grads.h * x; } },
+    ];
+  }
+
+  function fmt(v) { return v === null ? '?' : (typeof v==='number' ? v.toFixed(2) : v); }
+
+  function render() {
+    let s = '';
+    s += `<defs>
+      <marker id="arrowTeal" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#0E7C7B"/></marker>
+      <marker id="arrowCoral" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#E4572E"/></marker>
+      <filter id="nodeShadow"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.1"/></filter>
+    </defs>`;
+
+    // Forward edges
+    edges.forEach((e, i) => {
+      const n1 = nodes.find(n=>n.id===e.from), n2 = nodes.find(n=>n.id===e.to);
+      const edgeLabels = [`×w1 = ×${w1}`, `×w2 = ×${w2}`, `compare to target=${target}`];
+      const done = idx > i;
+      const opacity = done ? 1 : 0.3;
+      s += `<line x1="${n1.x+70}" y1="${n1.y}" x2="${n2.x-70}" y2="${n2.y}"
+        stroke="#0E7C7B" stroke-width="${done ? 3 : 1.5}" stroke-opacity="${opacity}"
+        marker-end="url(#arrowTeal)" />`;
+      s += `<text x="${(n1.x+n2.x)/2}" y="${n1.y-18}" class="edge-label" fill="#0E7C7B"
+        text-anchor="middle" font-family="Courier New" font-size="12" opacity="${opacity}">${edgeLabels[i]}</text>`;
+    });
+
+    // Backward edges
+    if (idx >= 3) {
+      const bpairs = [['L','y'],['y','h'],['h','x']];
+      bpairs.forEach(([from,to], i) => {
+        if (idx > 3+i) {
+          const n1 = nodes.find(n=>n.id===from), n2 = nodes.find(n=>n.id===to);
+          s += `<line x1="${n1.x-65}" y1="${n1.y+40}" x2="${n2.x+65}" y2="${n2.y+40}"
+            stroke="#E4572E" stroke-width="3" marker-end="url(#arrowCoral)">
+            <animate attributeName="stroke-dashoffset" from="20" to="0" dur="0.5s" fill="freeze"/>
+          </line>`;
+        }
+      });
+    }
+
+    // Nodes
+    nodes.forEach(n => {
+      const v = values[n.id];
+      const isComputed = v !== null;
+      const fillColor = isComputed ? (n.id === 'L' ? '#FBE4DC' : '#DCEEED') : '#F7F7F7';
+      const strokeColor = isComputed ? (n.id === 'L' ? '#E4572E' : '#0E7C7B') : '#D0D0D0';
+
+      s += `<rect x="${n.x-60}" y="${n.y-32}" width="120" height="64" rx="12"
+        fill="${fillColor}" stroke="${strokeColor}" stroke-width="2" filter="url(#nodeShadow)"/>`;
+      s += `<text x="${n.x}" y="${n.y-42}" text-anchor="middle"
+        font-family="Arial" font-size="12" font-weight="bold" fill="#1A1A1A">${n.label}</text>`;
+      s += `<text x="${n.x}" y="${n.y+8}" text-anchor="middle"
+        font-family="Courier New" font-size="20" font-weight="bold" fill="#1A1A1A">${fmt(v)}</text>`;
+    });
+
+    // Gradient labels
+    if (idx >= 4) s += `<text x="700" y="168" text-anchor="middle" font-family="Courier New" font-size="13" font-weight="bold" fill="#E4572E">dL/dy = ${fmt(grads.y)}</text>`;
+    if (idx >= 5) s += `<text x="440" y="168" text-anchor="middle" font-family="Courier New" font-size="13" font-weight="bold" fill="#E4572E">dL/dh = ${fmt(grads.h)}</text>`;
+    if (idx >= 6) s += `<text x="190" y="168" text-anchor="middle" font-family="Courier New" font-size="13" font-weight="bold" fill="#E4572E">dL/dw1 = ${fmt(grads.w1)}</text>`;
+
+    svgEl.innerHTML = s;
+  }
+
+  function step() {
+    const steps = getSteps();
+    if (idx >= steps.length) return;
+    const st = steps[idx];
+    st.run();
+    const isBackward = st.phase === 'backward';
+    phaseLabel.textContent = isBackward ? 'Backward pass' : 'Forward pass';
+    phaseLabel.className = 'phase-label ' + (isBackward ? 'phase-backward' : 'phase-forward');
+    statusText.className = 'status' + (isBackward ? ' backward-active' : '');
+
+    if (idx === 0) { statusText.textContent = `h = x × w1 = ${x} × ${w1} = ${values.h.toFixed(2)}`; formulaText.textContent = 'h = x · w1'; }
+    if (idx === 1) { statusText.textContent = `y = h × w2 = ${values.h.toFixed(2)} × ${w2} = ${values.y.toFixed(2)}`; formulaText.textContent = 'y = h · w2'; }
+    if (idx === 2) { statusText.textContent = `L = (y − target)² = (${values.y.toFixed(2)} − ${target})² = ${values.L.toFixed(2)}  ← how wrong we are`; formulaText.textContent = 'L = (y − target)²'; }
+    if (idx === 3) { statusText.textContent = `dL/dy = 2(y − target) = 2(${values.y.toFixed(2)} − ${target}) = ${grads.y.toFixed(2)}  ← backprop STARTS here`; formulaText.textContent = 'dL/dy = 2(y − target)  ← starting point'; }
+    if (idx === 4) { statusText.textContent = `dL/dh = dL/dy × w2 = ${grads.y.toFixed(2)} × ${w2} = ${grads.h.toFixed(2)}  ← chain rule, one multiply`; formulaText.textContent = 'dL/dh = dL/dy × w2  (local slope = w2)'; }
+    if (idx === 5) { statusText.textContent = `dL/dw1 = dL/dh × x = ${grads.h.toFixed(2)} × ${x} = ${grads.w1.toFixed(2)}  ← THIS updates w1!`; formulaText.textContent = 'dL/dw1 = dL/dh × x  ← the number optimizer.step() uses'; }
+
+    idx++;
+    render();
+    if (idx >= steps.length) { document.getElementById('stepBtn').disabled = true; document.getElementById('stepBtn').textContent = 'Done ✓'; }
+  }
+
+  function doReset() {
+    readParams();
+    idx = 0;
+    values = { x: x, h: null, y: null, L: null };
+    grads = { L: null, y: null, h: null, w1: null, w2: null };
+    statusText.textContent = 'Click "Step" to compute x → h';
+    statusText.className = 'status';
+    formulaText.textContent = '';
+    phaseLabel.textContent = 'Forward pass'; phaseLabel.className = 'phase-label phase-forward';
+    document.getElementById('stepBtn').disabled = false; document.getElementById('stepBtn').textContent = 'Step ▶';
+    render();
+  }
+
+  document.getElementById('stepBtn').addEventListener('click', step);
+  document.getElementById('resetBtn').addEventListener('click', doReset);
+  readParams();
+  doReset();
+</script>
+
+</body>
+</html>

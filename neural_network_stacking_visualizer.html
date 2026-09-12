@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Why Depth Needs Non-linearity — TARA</title>
+<style>
+  :root { --teal:#0E7C7B; --teal-lt:#DCEEED; --coral:#E4572E; --coral-lt:#FBE4DC; --purple:#6C4AB6; --purple-lt:#EAE3F7; --grey:#8A8A8A; --grey-line:#D0D0D0; --bg:#F7F7F7; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI",Arial,sans-serif; margin:0; padding:26px 40px; background:#fff; color:#1A1A1A; }
+  h1 { font-size:24px; margin:0 0 4px 0; }
+  .subtitle { color:var(--grey); font-size:14px; margin-bottom:18px; }
+
+  .toggle-row { display:flex; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+  .toggle-row label { font-size:13px; font-weight:bold; color:var(--grey); }
+  .seg { display:inline-flex; border-radius:9px; overflow:hidden; border:1.5px solid var(--grey-line); }
+  .seg button { border:none; background:#fff; padding:8px 16px; font-family:inherit; font-size:13px; font-weight:bold; cursor:pointer; color:var(--grey); transition:all 0.2s; }
+  .seg button.active { background:var(--teal); color:#fff; }
+  .seg button + button { border-left:1.5px solid var(--grey-line); }
+
+  .panel { border:1.5px solid var(--grey-line); border-radius:14px; padding:20px 22px; margin-bottom:20px; }
+  .panel h2 { font-size:16px; margin:0 0 4px 0; }
+  .panel .desc { font-size:12.5px; color:var(--grey); margin-bottom:14px; max-width:900px; }
+
+  svg { overflow:visible; }
+  .layer-tag { font-family:"Courier New",monospace; font-size:11px; fill:var(--grey); font-weight:bold; }
+  .edge-pos { stroke:var(--teal); }
+  .edge-neg { stroke:var(--coral); }
+  .node-circle { transition:all 0.3s; }
+  .node-val { font-family:"Courier New",monospace; font-weight:bold; font-size:11px; fill:#1A1A1A; }
+
+  .collapse-row { display:flex; gap:18px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+  .matrix-box { font-family:"Courier New",monospace; font-size:13px; background:var(--bg); border:1.5px solid var(--grey-line); border-radius:10px; padding:10px 14px; text-align:center; transition:all 0.3s; }
+  .matrix-box .cap { font-size:10px; color:var(--grey); margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px; }
+  .matrix-grid { display:inline-grid; gap:3px; }
+  .matrix-cell { width:34px; height:26px; display:flex; align-items:center; justify-content:center; border-radius:4px; font-size:12px; font-weight:bold; }
+  .collapse-arrow { font-size:22px; color:var(--grey); }
+  .verdict { margin-top:16px; padding:12px 16px; border-radius:10px; font-size:14px; font-weight:bold; transition:all 0.3s; }
+  .verdict.bad { background:var(--coral-lt); color:var(--coral); }
+  .verdict.good { background:var(--teal-lt); color:var(--teal); }
+
+  .curve-wrap { display:flex; gap:24px; align-items:flex-start; flex-wrap:wrap; }
+  canvas#curveCanvas { border:1.5px solid var(--grey-line); border-radius:10px; background:#FAFAFA; }
+  .curve-legend { display:flex; flex-direction:column; gap:8px; font-size:13px; padding-top:6px; }
+  .curve-legend span { display:flex; align-items:center; gap:8px; }
+  .sw { width:26px; height:4px; border-radius:2px; display:inline-block; }
+
+  .note { margin-top:6px; background:#FFF9E0; border:1.5px solid #FFE01B; border-radius:8px; padding:14px 18px; font-size:13px; font-style:italic; max-width:960px; }
+</style>
+</head>
+<body>
+
+<h1>Why Depth Needs Non-linearity</h1>
+<div class="subtitle">TARA · Week 2 · Section 1 — a real network diagram (not boxes), the matrix collapse, and what an activation function buys you</div>
+
+<div class="toggle-row">
+  <label>Activation between layers:</label>
+  <div class="seg" id="actSeg">
+    <button data-act="none" class="active">None (pure linear)</button>
+    <button data-act="relu">ReLU</button>
+    <button data-act="tanh">tanh</button>
+    <button data-act="sigmoid">sigmoid</button>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>1 — The network itself</h2>
+  <div class="desc">Two inputs → hidden layer of 3 → output. Every line is a real weight (teal = positive, coral = negative, thickness = magnitude) — exactly what a Linear layer stores. Switch the activation above and watch the hidden-layer values actually change.</div>
+  <svg id="netSvg" width="920" height="260" viewBox="0 0 920 260"></svg>
+</div>
+
+<div class="panel">
+  <h2>2 — Does stacking these two layers actually buy you anything?</h2>
+  <div class="desc">W₁ (input→hidden) and W₂ (hidden→output) are fixed, real matrices. Watch what happens when you compose them.</div>
+  <div class="collapse-row" id="collapseRow"></div>
+  <div class="verdict" id="verdict"></div>
+</div>
+
+<div class="panel">
+  <h2>3 — What this means for fitting an actual curve</h2>
+  <div class="desc">Target: a wiggly function of x. Same two-layer network, same weights — only the activation changes. This is the entire "functions describe the world" idea made concrete: can this network's output curve bend, or is it stuck being a straight line?</div>
+  <div class="curve-wrap">
+    <canvas id="curveCanvas" width="520" height="300"></canvas>
+    <div class="curve-legend">
+      <span><span class="sw" style="background:var(--grey)"></span>target function (unknown, wiggly)</span>
+      <span><span class="sw" style="background:var(--coral)"></span>network output, no activation</span>
+      <span><span class="sw" style="background:var(--teal)"></span>network output, with your chosen activation</span>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  Two Linear layers back to back compute <code>y = W₂(W₁x) = (W₂W₁)x</code> — algebraically ONE matrix, no matter
+  how many Linear layers you stack. An activation function sits between them and breaks that algebra: you can no
+  longer multiply the two weight matrices together and get an equivalent single layer, because there's a non-linear
+  function in between. That's the entire reason every real network alternates Linear → activation → Linear → activation…
+</div>
+
+<script>
+  // ---------------- deterministic weights ----------------
+  function seededRand(seed) { let s = seed>>>0; return function(){ s=(s*1664525+1013904223)>>>0; return s/4294967296; }; }
+  function mat(rows, cols, seed, scale) {
+    const rand = seededRand(seed); const m = [];
+    for (let i=0;i<rows;i++){ const row=[]; for (let j=0;j<cols;j++) row.push((rand()*2-1)*scale); m.push(row); }
+    return m;
+  }
+  const W1 = mat(3, 2, 11, 1.1);   // hidden(3) x input(2)
+  const W2 = mat(1, 3, 23, 0.9);   // output(1) x hidden(3)
+
+  function matmul(A, B) {
+    const rows=A.length, inner=A[0].length, cols=B[0].length;
+    const out = [];
+    for (let i=0;i<rows;i++){ const row=[]; for (let j=0;j<cols;j++){ let s=0; for(let k=0;k<inner;k++) s+=A[i][k]*B[k][j]; row.push(s);} out.push(row); }
+    return out;
+  }
+
+  function activate(name, v) {
+    if (name==='relu') return Math.max(0, v);
+    if (name==='tanh') return Math.tanh(v);
+    if (name==='sigmoid') return 1/(1+Math.exp(-v));
+    return v;
+  }
+  const actDerivativeNote = { none:'identity — no bend at all', relu:'flat, then a hinge at 0', tanh:'S-shaped, saturates both ends', sigmoid:'S-shaped, saturates 0→1' };
+
+  let currentAct = 'none';
+
+  // ---------------- network diagram ----------------
+  const inputs = [0.7, -0.4];
+  const netSvg = document.getElementById('netSvg');
+  function drawNetwork() {
+    const inX = 90, hidX = 460, outX = 820;
+    const inYs = [90, 180];
+    const hidYs = [60, 150, 240];
+    const outYs = [150];
+
+    const hiddenPre = matmul(W1, inputs.map(v=>[v])).map(r=>r[0]);
+    const hiddenAct = hiddenPre.map(v => activate(currentAct, v));
+    const outPre = matmul(W2, hiddenAct.map(v=>[v])).map(r=>r[0]);
+
+    let s = `<defs><filter id="sh"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.12"/></filter></defs>`;
+
+    function edge(x1,y1,x2,y2,w) {
+      const th = Math.max(1, Math.min(7, Math.abs(w)*4));
+      const cls = w>=0 ? 'edge-pos' : 'edge-neg';
+      const op = Math.max(0.25, Math.min(0.9, Math.abs(w)*0.7));
+      return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="${cls}" stroke-width="${th}" stroke-opacity="${op}"/>`;
+    }
+    // input -> hidden
+    inYs.forEach((iy,i) => hidYs.forEach((hy,h) => { s += edge(inX+26, iy, hidX-26, hy, W1[h][i]); }));
+    // hidden -> output
+    hidYs.forEach((hy,h) => { s += edge(hidX+26, hy, outX-26, outYs[0], W2[0][h]); });
+
+    function node(x,y,label,val,color) {
+      return `<circle cx="${x}" cy="${y}" r="24" fill="${color}22" stroke="${color}" stroke-width="2.5" filter="url(#sh)" class="node-circle"/>
+        <text x="${x}" y="${y-32}" text-anchor="middle" class="layer-tag">${label}</text>
+        <text x="${x}" y="${y+5}" text-anchor="middle" class="node-val">${val.toFixed(2)}</text>`;
+    }
+    inputs.forEach((v,i) => s += node(inX, inYs[i], `x${i+1}`, v, '#0E7C7B'));
+    hiddenAct.forEach((v,h) => s += node(hidX, hidYs[h], currentAct==='none' ? `h${h+1}` : `σ(h${h+1})`, v, '#6C4AB6'));
+    s += node(outX, outYs[0], 'out', outPre[0], '#E4572E');
+
+    s += `<text x="${inX}" y="270" text-anchor="middle" class="layer-tag">input</text>
+          <text x="${hidX}" y="270" text-anchor="middle" class="layer-tag">hidden (${currentAct==='none'?'no activation':currentAct})</text>
+          <text x="${outX}" y="270" text-anchor="middle" class="layer-tag">output</text>`;
+
+    netSvg.innerHTML = s;
+  }
+
+  // ---------------- collapse demo ----------------
+  function cellColor(v, bound) {
+    const t = Math.max(-1, Math.min(1, v/bound));
+    if (t>=0) return `rgba(14,124,123,${0.15+Math.abs(t)*0.55})`;
+    return `rgba(228,87,46,${0.15+Math.abs(t)*0.55})`;
+  }
+  function matrixBoxHTML(caption, M, bound) {
+    let cells = '';
+    M.forEach(row => row.forEach(v => { cells += `<div class="matrix-cell" style="background:${cellColor(v,bound)}">${v.toFixed(2)}</div>`; }));
+    return `<div class="matrix-box"><div class="cap">${caption}</div><div class="matrix-grid" style="grid-template-columns:repeat(${M[0].length},34px)">${cells}</div></div>`;
+  }
+  function drawCollapse() {
+    const row = document.getElementById('collapseRow');
+    const verdict = document.getElementById('verdict');
+    const bound = 1.2;
+    let html = matrixBoxHTML('W₁ (3×2)', W1, bound);
+    html += `<div class="collapse-arrow">→</div>`;
+    html += matrixBoxHTML('W₂ (1×3)', W2, bound);
+    if (currentAct === 'none') {
+      const Weff = matmul(W2, W1); // 1x2
+      html += `<div class="collapse-arrow">=</div>`;
+      html += matrixBoxHTML('W₂W₁ — ONE matrix (1×2)', Weff, bound);
+      verdict.className = 'verdict bad';
+      verdict.textContent = 'No activation: two Linear layers collapse into exactly this single 1×2 matrix. Every extra layer you add this way is wasted — same expressive power as one layer.';
+    } else {
+      html += `<div class="collapse-arrow">✕</div>`;
+      html += `<div class="matrix-box"><div class="cap">can't multiply through</div><div style="padding:8px 6px; font-size:24px;">σ( · )</div></div>`;
+      verdict.className = 'verdict good';
+      verdict.textContent = `With ${currentAct} sitting between W₁ and W₂, there is no single matrix that reproduces this network — the ${actDerivativeNote[currentAct]} breaks the algebra, so the two layers are genuinely doing more together than either could alone.`;
+    }
+    row.innerHTML = html;
+  }
+
+  // ---------------- curve-fit demo ----------------
+  const curveCanvas = document.getElementById('curveCanvas');
+  const cctx = curveCanvas.getContext('2d');
+  function target(x) { return Math.sin(x*1.6) * 0.6 + Math.sin(x*4.1) * 0.15; }
+  function networkOutput(x, act) {
+    // tiny 2-layer net: input is just [x, 1] fed through W1/W2, activation optional
+    const hp = matmul(W1, [[x],[1]]).map(r=>r[0]);
+    const ha = hp.map(v => activate(act, v));
+    const o = matmul(W2, ha.map(v=>[v]))[0][0];
+    return o;
+  }
+  function drawCurve() {
+    const W = curveCanvas.width, H = curveCanvas.height;
+    const padL=40, padR=16, padT=16, padB=30;
+    const plotW = W-padL-padR, plotH = H-padT-padB;
+    const xMin=-3, xMax=3, yMin=-2, yMax=2;
+    cctx.clearRect(0,0,W,H);
+    cctx.strokeStyle = '#E8E8E8'; cctx.lineWidth=1;
+    for (let gy=-2; gy<=2; gy++) {
+      const y = padT + plotH*(1-(gy-yMin)/(yMax-yMin));
+      cctx.beginPath(); cctx.moveTo(padL,y); cctx.lineTo(W-padR,y); cctx.stroke();
+    }
+    cctx.strokeStyle = '#D0D0D0'; cctx.lineWidth=1.5;
+    cctx.beginPath(); cctx.moveTo(padL,padT); cctx.lineTo(padL,H-padB); cctx.lineTo(W-padR,H-padB); cctx.stroke();
+
+    function plot(fn, color, lw) {
+      cctx.strokeStyle = color; cctx.lineWidth = lw; cctx.beginPath();
+      for (let i=0;i<=200;i++) {
+        const x = xMin + (xMax-xMin)*i/200;
+        const y = fn(x);
+        const px = padL + plotW*(x-xMin)/(xMax-xMin);
+        const py = padT + plotH*(1-(Math.max(yMin,Math.min(yMax,y))-yMin)/(yMax-yMin));
+        if (i===0) cctx.moveTo(px,py); else cctx.lineTo(px,py);
+      }
+      cctx.stroke();
+    }
+    plot(target, '#8A8A8A', 2);
+    plot((x)=>networkOutput(x,'none'), '#E4572E', 2.5);
+    plot((x)=>networkOutput(x,currentAct), '#0E7C7B', 2.5);
+  }
+
+  function renderAll() { drawNetwork(); drawCollapse(); drawCurve(); }
+
+  document.querySelectorAll('#actSeg button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#actSeg button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      currentAct = btn.dataset.act;
+      renderAll();
+    });
+  });
+
+  renderAll();
+</script>
+
+</body>
+</html>

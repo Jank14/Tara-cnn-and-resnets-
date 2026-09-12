@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ReLU Piecewise-Linear Explorer — TARA</title>
+<style>
+  :root { --teal:#0E7C7B; --coral:#E4572E; --purple:#6C4AB6; --grey:#8A8A8A; --grey-line:#D8D8D8; --bg:#F7F7F7; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI",Arial,sans-serif; margin:0; padding:24px 36px; background:#fff; color:#1A1A1A; }
+  h1 { font-size:22px; margin:0 0 2px 0; }
+  .subtitle { color:var(--grey); font-size:13px; margin-bottom:16px; }
+  .tabs { display:flex; gap:8px; margin-bottom:18px; }
+  .tab { padding:9px 18px; border-radius:8px; border:1.5px solid var(--grey-line); background:#fff; font-size:13.5px; font-weight:bold; cursor:pointer; color:#555; }
+  .tab.active { background:var(--teal); color:#fff; border-color:var(--teal); }
+  .panel { display:none; }
+  .panel.active { display:block; }
+  .layout { display:flex; gap:24px; align-items:flex-start; }
+  .chart-col { flex:1.6; }
+  .side-col { flex:1; min-width:290px; }
+  svg { background:var(--bg); border-radius:10px; border:1.5px solid var(--grey-line); }
+  .slider-row { margin-bottom:13px; }
+  .slider-row label { display:flex; justify-content:space-between; font-size:12px; font-weight:bold; margin-bottom:3px; }
+  .slider-row .val { font-family:"Courier New",monospace; }
+  input[type=range] { width:100%; }
+  .formula-box { font-family:"Courier New",monospace; font-size:12.5px; background:#1E1E2E; color:#D4D4E0; border-radius:10px; padding:12px 14px; margin-bottom:14px; }
+  .formula-box .hi { color:#9CDCDB; font-weight:bold; }
+  .metric-box { background:var(--bg); border-radius:10px; padding:12px 14px; border:1.5px solid var(--grey-line); margin-top:10px; }
+  .metric-box .lbl { font-size:11px; color:var(--grey); text-transform:uppercase; letter-spacing:0.5px; }
+  .metric-box .val { font-family:"Courier New",monospace; font-size:20px; font-weight:bold; color:var(--coral); }
+  button.reset { margin-top:12px; font-size:12.5px; padding:7px 14px; border-radius:7px; border:1.5px solid var(--grey-line); background:#fff; cursor:pointer; }
+  .note { margin-top:14px; background:#FFF9E0; border:1.5px solid #FFE01B; border-radius:8px; padding:11px 14px; font-size:12px; font-style:italic; }
+  .knot-sliders { display:grid; grid-template-columns:1fr 1fr; gap:0 14px; }
+</style>
+</head>
+<body>
+
+<h1>ReLU Piecewise-Linear Explorer</h1>
+<div class="subtitle">TARA · Week 2 · Fundamentals — f(x) = b + Σ cᵢ·ReLU(x − xᵢ). Source: ferumlab.com/blog/nn-piecewise-linear-approx</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="feel">Feel It — 5 Hinges, You Control the Slopes</div>
+  <div class="tab" data-tab="fit">Auto-Fit — More Segments, Better Fit</div>
+</div>
+
+<!-- ============ TAB A: manual hinge control ============ -->
+<div class="panel active" id="panel-feel">
+  <div class="layout">
+    <div class="chart-col">
+      <svg id="chartFeel" width="660" height="420" viewBox="0 0 660 420"></svg>
+    </div>
+    <div class="side-col">
+      <div class="formula-box">f(x) = <span class="hi">Σ cᵢ · ReLU(x − xᵢ)</span></div>
+      <div class="knot-sliders" id="knotSliders"></div>
+      <button class="reset" id="resetFeel">Reset all to 0</button>
+      <div class="note">Each slider is one knot (hinge point). Drag ONE and watch: the curve is UNCHANGED before that knot, and picks up exactly that much extra slope after it. This is literally what training adjusts — the knot positions here are fixed, only the coefficients (slopes) move.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ TAB B: auto-fit with adjustable N ============ -->
+<div class="panel" id="panel-fit">
+  <div class="layout">
+    <div class="chart-col">
+      <svg id="chartFit" width="660" height="420" viewBox="0 0 660 420"></svg>
+    </div>
+    <div class="side-col">
+      <div class="slider-row">
+        <label>Target curve</label>
+        <select id="targetSelect" style="width:100%; padding:7px; border-radius:7px; border:1.5px solid var(--grey-line); font-size:13px; font-weight:bold;">
+          <option value="wiggly">Wiggly — sin(4πx)</option>
+          <option value="vshape">V-shape — |x − 0.5|</option>
+          <option value="scurve">S-curve — steep logistic step</option>
+        </select>
+      </div>
+      <div class="slider-row">
+        <label>N segments (knots) <span class="val" id="nSegVal">4</span></label>
+        <input type="range" id="nSeg" min="2" max="30" step="1" value="4">
+      </div>
+      <div class="metric-box">
+        <div class="lbl">fit error (MSE, lower = better)</div>
+        <div class="val" id="mseVal">—</div>
+      </div>
+      <div class="note" id="noteFit">Target: y = sin(4πx) + a little noise — the same "hard" example from the source article. Drag N up from 2 and watch the purple piecewise-linear fit go from a crude ramp to tracking every wiggle. Each extra knot is one more place the line is allowed to change slope — that's the ENTIRE mechanism, no other magic.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ---------- shared plotting helpers ----------
+  const Wd = 660, Hd = 420, padL = 44, padB = 34, padT = 18, padR = 16;
+  const plotW = Wd - padL - padR, plotH = Hd - padT - padB;
+  function sx(v, xMin, xMax) { return padL + ((v - xMin) / (xMax - xMin)) * plotW; }
+  function sy(v, yMin, yMax) { return (Hd - padB) - ((v - yMin) / (yMax - yMin)) * plotH; }
+  function drawAxes(xMin, xMax, yMin, yMax) {
+    let s = `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${Hd - padB}" stroke="#D8D8D8" stroke-width="1.5"/>`;
+    s += `<line x1="${padL}" y1="${Hd - padB}" x2="${Wd - padR}" y2="${Hd - padB}" stroke="#D8D8D8" stroke-width="1.5"/>`;
+    if (yMin < 0 && yMax > 0) s += `<line x1="${padL}" y1="${sy(0,yMin,yMax)}" x2="${Wd-padR}" y2="${sy(0,yMin,yMax)}" stroke="#EEEEEE" stroke-width="1"/>`;
+    for (let i = 0; i <= 5; i++) {
+      const t = xMin + (i / 5) * (xMax - xMin);
+      s += `<text x="${sx(t,xMin,xMax)}" y="${Hd - padB + 16}" text-anchor="middle" font-size="10" fill="#8A8A8A">${t.toFixed(1)}</text>`;
+    }
+    return s;
+  }
+  function linePath(pts, xMin, xMax, yMin, yMax) {
+    let d = '';
+    pts.forEach((p, i) => {
+      const px = sx(p[0], xMin, xMax), py = sy(Math.max(yMin - 1, Math.min(yMax + 1, p[1])), yMin, yMax);
+      d += (i === 0 ? 'M' : 'L') + px.toFixed(1) + ',' + py.toFixed(1) + ' ';
+    });
+    return d;
+  }
+  function relu(x) { return Math.max(0, x); }
+
+  // ================= TAB A: feel it (5 fixed knots, manual coefficients) =================
+  const knots = [-0.1, 0.2, 0.5, 0.8, 1.1];
+  const colors = ['#0E7C7B', '#E4572E', '#6C4AB6', '#1A8FA0', '#B5541A'];
+  let coeffs = [0, 0, 0, 0, 0];
+  const bFeel = 0.3;
+
+  function fFeel(x) {
+    let y = bFeel;
+    for (let i = 0; i < knots.length; i++) y += coeffs[i] * relu(x - knots[i]);
+    return y;
+  }
+  function buildKnotSliders() {
+    const container = document.getElementById('knotSliders');
+    container.innerHTML = '';
+    knots.forEach((k, i) => {
+      const div = document.createElement('div');
+      div.className = 'slider-row';
+      div.innerHTML = `<label style="color:${colors[i]}">c${i+1} @ x=${k} <span class="val" id="cVal${i}">0.00</span></label>
+        <input type="range" id="cSlider${i}" min="-3" max="3" step="0.05" value="0">`;
+      container.appendChild(div);
+      document.getElementById(`cSlider${i}`).addEventListener('input', (e) => {
+        coeffs[i] = parseFloat(e.target.value);
+        document.getElementById(`cVal${i}`).textContent = coeffs[i].toFixed(2);
+        renderFeel();
+      });
+    });
+  }
+  function renderFeel() {
+    const xMin = -0.5, xMax = 1.5;
+    const pts = []; for (let i = 0; i <= 200; i++) { const x = xMin + (i/200)*(xMax-xMin); pts.push([x, fFeel(x)]); }
+    const ys = pts.map(p => p[1]);
+    const yMin = Math.min(...ys, -1) - 0.5, yMax = Math.max(...ys, 1) + 0.5;
+    let s = drawAxes(xMin, xMax, yMin, yMax);
+    knots.forEach((k, i) => {
+      s += `<line x1="${sx(k,xMin,xMax)}" y1="${padT}" x2="${sx(k,xMin,xMax)}" y2="${Hd-padB}" stroke="${colors[i]}" stroke-width="1" stroke-dasharray="3,4" opacity="0.55"/>`;
+      s += `<circle cx="${sx(k,xMin,xMax)}" cy="${sy(fFeel(k),yMin,yMax)}" r="4" fill="${colors[i]}"/>`;
+    });
+    s += `<path d="${linePath(pts, xMin, xMax, yMin, yMax)}" fill="none" stroke="#1A1A1A" stroke-width="3"/>`;
+    document.getElementById('chartFeel').innerHTML = s;
+  }
+  document.getElementById('resetFeel').addEventListener('click', () => {
+    coeffs = [0,0,0,0,0];
+    knots.forEach((k,i) => { document.getElementById(`cSlider${i}`).value = 0; document.getElementById(`cVal${i}`).textContent = '0.00'; });
+    renderFeel();
+  });
+
+  // ================= TAB B: auto-fit with adjustable N (least squares) =================
+  let targetXs = []; let targetYs = [];
+  let currentTarget = 'wiggly';
+  const targetDefs = {
+    wiggly: (x, rnd) => Math.sin(4 * Math.PI * x) + (rnd() - 0.5) * 0.2,
+    vshape: (x, rnd) => 2.4 * Math.abs(x - 0.5) - 0.6 + (rnd() - 0.5) * 0.08,
+    scurve: (x, rnd) => 1.4 / (1 + Math.exp(-16 * (x - 0.5))) - 0.7 + (rnd() - 0.5) * 0.08,
+  };
+  function seedTarget(kind) {
+    targetXs = []; targetYs = [];
+    let seed = 7;
+    function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; }
+    const fn = targetDefs[kind];
+    for (let i = 0; i < 60; i++) {
+      const x = i / 59;
+      targetXs.push(x); targetYs.push(fn(x, rnd));
+    }
+  }
+  seedTarget(currentTarget);
+  document.getElementById('targetSelect').addEventListener('change', (e) => {
+    currentTarget = e.target.value;
+    seedTarget(currentTarget);
+    renderFit();
+  });
+
+  function solveLstSq(X, y, nParams) {
+    const XT_X = Array.from({length: nParams}, () => new Array(nParams).fill(0));
+    const XT_y = new Array(nParams).fill(0);
+    for (let i = 0; i < X.length; i++) {
+      for (let a = 0; a < nParams; a++) {
+        XT_y[a] += X[i][a] * y[i];
+        for (let bIdx = 0; bIdx < nParams; bIdx++) XT_X[a][bIdx] += X[i][a] * X[i][bIdx];
+      }
+    }
+    const ridge = 1e-4;
+    for (let a = 0; a < nParams; a++) XT_X[a][a] += ridge;
+    const A = XT_X.map((row, i) => row.concat([XT_y[i]]));
+    for (let col = 0; col < nParams; col++) {
+      let piv = col;
+      for (let r = col + 1; r < nParams; r++) if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
+      [A[col], A[piv]] = [A[piv], A[col]];
+      if (Math.abs(A[col][col]) < 1e-10) continue;
+      for (let r = 0; r < nParams; r++) {
+        if (r === col) continue;
+        const factor = A[r][col] / A[col][col];
+        for (let c2 = col; c2 <= nParams; c2++) A[r][c2] -= factor * A[col][c2];
+      }
+    }
+    return A.map((row, i) => Math.abs(row[i]) < 1e-10 ? 0 : row[nParams] / row[i]);
+  }
+
+  function fitPiecewise(n) {
+    const nKnots = n + 1;
+    const knotXs = []; for (let i = 0; i < nKnots; i++) knotXs.push(-0.1 + (i / n) * 1.2);
+    const nParams = nKnots + 1;
+    const X = targetXs.map((x) => [1, ...knotXs.map((k) => relu(x - k))]);
+    const coefs = solveLstSq(X, targetYs, nParams);
+    const b = coefs[0], cs = coefs.slice(1);
+    function fn(x) { let yv = b; for (let i = 0; i < nKnots; i++) yv += cs[i] * relu(x - knotXs[i]); return yv; }
+    let mse = 0; for (let i = 0; i < targetXs.length; i++) mse += (fn(targetXs[i]) - targetYs[i]) ** 2; mse /= targetXs.length;
+    return { fn, knotXs, mse };
+  }
+
+  function renderFit() {
+    const n = parseInt(document.getElementById('nSeg').value);
+    document.getElementById('nSegVal').textContent = n;
+    const { fn, knotXs, mse } = fitPiecewise(n);
+    const xMin = -0.05, xMax = 1.05;
+    const targetPts = targetXs.map((x, i) => [x, targetYs[i]]);
+    const fitPts = []; for (let i = 0; i <= 200; i++) { const x = i/200; fitPts.push([x, fn(x)]); }
+    const yLo = Math.min(...targetYs), yHi = Math.max(...targetYs);
+    const yPad = Math.max(0.3, (yHi - yLo) * 0.25);
+    const yMin = yLo - yPad, yMax = yHi + yPad;
+    let s = drawAxes(xMin, xMax, yMin, yMax);
+    targetPts.forEach((p) => {
+      s += `<circle cx="${sx(p[0],xMin,xMax)}" cy="${sy(p[1],yMin,yMax)}" r="2.3" fill="#8A8A8A" opacity="0.65"/>`;
+    });
+    knotXs.forEach((k) => {
+      if (k >= xMin && k <= xMax) s += `<line x1="${sx(k,xMin,xMax)}" y1="${Hd-padB}" x2="${sx(k,xMin,xMax)}" y2="${Hd-padB+5}" stroke="#6C4AB6" stroke-width="2"/>`;
+    });
+    s += `<path d="${linePath(fitPts, xMin, xMax, yMin, yMax)}" fill="none" stroke="#6C4AB6" stroke-width="3"/>`;
+    s += `<text x="${padL+6}" y="${padT+14}" font-size="11" fill="#8A8A8A">grey dots = target data · purple = piecewise-linear fit · purple ticks on axis = knots</text>`;
+    document.getElementById('chartFit').innerHTML = s;
+    document.getElementById('mseVal').textContent = mse.toFixed(4);
+    const shapeWord = { wiggly: 'wiggle of sin(4πx)', vshape: 'sharp corner of the V', scurve: 'steep middle of the S-curve' }[currentTarget];
+    const easyTarget = currentTarget === 'vshape';
+    if (easyTarget && n >= 2) document.getElementById('noteFit').textContent = "Notice this one's different — a V-shape genuinely IS piecewise linear (just one corner), so even N=2 fits it almost perfectly. Not every target needs many knots — only the ones that actually curve or oscillate do.";
+    else if (n <= 5) document.getElementById('noteFit').textContent = `Too few knots — the line physically cannot bend often enough to follow the ${shapeWord}. Drag N up.`;
+    else if (n <= 15) document.getElementById('noteFit').textContent = `Better — the big shape is captured, but the ${shapeWord} still gets rounded off. More knots = more places to bend.`;
+    else document.getElementById('noteFit').textContent = "Now the fit tracks it closely — this is literally Example 2 from the source article: 10 segments struggle, 20 are better, 30 track it well. Try switching the target curve above — the SAME mechanism handles all three shapes.";
+  }
+  document.getElementById('nSeg').addEventListener('input', renderFit);
+
+  document.querySelectorAll('.tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+    });
+  });
+
+  buildKnotSliders();
+  renderFeel();
+  renderFit();
+</script>
+
+</body>
+</html>

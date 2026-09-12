@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Reading einsum — TARA</title>
+<style>
+  :root { --teal:#0E7C7B; --teal-lt:#DCEEED; --coral:#E4572E; --coral-lt:#FBE4DC; --purple:#6C4AB6; --purple-lt:#EAE3F7; --gold:#D4A017; --gold-lt:#FFF3D0; --grey:#8A8A8A; --grey-line:#D0D0D0; --bg:#F7F7F7; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI",Arial,sans-serif; margin:0; padding:26px 40px; background:#fff; color:#1A1A1A; }
+  h1 { font-size:26px; margin:0 0 4px 0; }
+  .subtitle { color:var(--grey); font-size:14px; margin-bottom:22px; }
+  .tabs { display:flex; gap:10px; margin-bottom:20px; }
+  .tab { padding:10px 20px; border-radius:10px; border:2px solid var(--grey-line); background:#fff; cursor:pointer; font-size:14px; font-weight:bold; transition:all 0.2s; }
+  .tab:hover { border-color:var(--teal); background:var(--teal-lt); }
+  .tab.active { background:var(--teal); color:#fff; border-color:var(--teal); }
+
+  .einsum-string {
+    font-family:"Courier New",monospace; font-size:26px; font-weight:bold;
+    text-align:center; margin:18px 0; padding:18px 20px;
+    background:var(--bg); border-radius:12px; border:1.5px solid var(--grey-line);
+  }
+  .letter { padding:4px 6px; border-radius:5px; margin:0 1px; display:inline-block; }
+  .letter.contract { background:#E4572E; color:#fff; }
+  .letter.keep { background:#0E7C7B; color:#fff; }
+  .letter.batch { background:#6C4AB6; color:#fff; }
+
+  .layout { display:flex; gap:30px; align-items:flex-start; justify-content:center; margin-top:22px; flex-wrap:wrap; }
+  .tensor-block { text-align:center; }
+  .tensor-label { font-family:"Courier New",monospace; font-size:14px; font-weight:bold; margin-bottom:10px; color:var(--grey); }
+  .dgrid { display:inline-grid; gap:2px; }
+  .dcell {
+    width:52px; height:46px; display:flex; align-items:center; justify-content:center;
+    font-family:"Courier New",monospace; font-size:14px; font-weight:bold;
+    border:2px solid var(--grey-line); border-radius:4px; background:#fff;
+    transition:transform 0.7s cubic-bezier(0.4,0,0.2,1), opacity 0.7s ease, background 0.3s, border-color 0.3s;
+  }
+  /* Contract cells = coral/red - these will collapse */
+  .dcell.contract-col { background:#FBE4DC; color:#C0412A; border-color:#E4572E; }
+  .dcell.contract-row { background:#FBE4DC; color:#C0412A; border-color:#E4572E; }
+  /* Keep cells = teal/green - these survive */
+  .dcell.keep-col { background:#DCEEED; color:#0A5F5E; border-color:#0E7C7B; }
+  .dcell.keep-row { background:#DCEEED; color:#0A5F5E; border-color:#0E7C7B; }
+  /* Batch cells = purple */
+  .dcell.batch-cell { background:#EAE3F7; color:#5A3D9E; border-color:#6C4AB6; }
+
+  .dcell.collapsing { transform:scaleY(0.02); opacity:0; }
+  .dcell.collapsing-col { transform:scaleX(0.02); opacity:0; }
+  .out-wrap { transition:opacity 0.5s ease 0.6s, transform 0.5s ease 0.6s; }
+  .out-wrap.pending { opacity:0; transform:scale(0.85); }
+  .out-wrap .dcell { background:#DCEEED; color:#0A5F5E; border-color:#0E7C7B; font-weight:bold; }
+  .arrow-label { font-size:28px; color:var(--grey); align-self:center; }
+
+  .axis-label {
+    font-family:"Courier New",monospace; font-size:12px; font-weight:bold;
+    padding:2px 6px; border-radius:4px; margin:2px;
+  }
+  .axis-label.contract-ax { background:#E4572E; color:#fff; }
+  .axis-label.keep-ax { background:#0E7C7B; color:#fff; }
+  .axis-label.batch-ax { background:#6C4AB6; color:#fff; }
+  .axis-labels-row { display:flex; justify-content:center; gap:4px; margin-bottom:6px; }
+  .axis-labels-col { display:flex; flex-direction:column; gap:2px; justify-content:center; margin-right:6px; }
+
+  .anim-controls { display:flex; gap:12px; justify-content:center; margin-top:20px; align-items:center; }
+  .anim-controls button {
+    font-family:inherit; font-size:14px; padding:9px 20px; border-radius:8px;
+    border:1.5px solid var(--grey-line); background:#fff; cursor:pointer; font-weight:bold; transition:all 0.2s;
+  }
+  .anim-controls button.primary { background:var(--coral); color:#fff; border:none; }
+  .anim-controls button.primary:hover { background:#c94524; }
+  .anim-controls button:disabled { opacity:0.4; cursor:not-allowed; }
+  .step-info { font-size:13px; color:var(--coral); font-weight:bold; min-height:20px; text-align:center; margin-top:6px; }
+
+  .legend {
+    display:flex; gap:20px; margin-top:22px; font-size:13px; justify-content:center; flex-wrap:wrap;
+    padding:14px 18px; background:var(--bg); border-radius:10px;
+  }
+  .legend span { display:flex; align-items:center; gap:6px; }
+  .sw { width:20px; height:20px; border-radius:5px; display:inline-block; border:2px solid; }
+
+  .explain { max-width:900px; margin:18px auto 0 auto; font-size:15px; line-height:1.65; padding:14px 18px; background:var(--bg); border-radius:10px; }
+  .note { margin-top:18px; background:#FFF9E0; border:1.5px solid #FFE01B; border-radius:8px; padding:14px 18px; font-size:14px; font-style:italic; max-width:900px; }
+</style>
+</head>
+<body>
+
+<h1>Reading einsum — Watch the Shared Dimension Collapse</h1>
+<div class="subtitle">TARA · Week 2 · Section 2 — same three rules explain every einsum you'll meet all course</div>
+
+<div class="tabs">
+  <button class="tab active" data-mode="contract">Matrix multiply (contract)</button>
+  <button class="tab" data-mode="batch">Batch dot-product (keep + contract)</button>
+  <button class="tab" data-mode="outer">Attention scores (outer)</button>
+</div>
+
+<div class="einsum-string" id="einsumStr"></div>
+
+<div class="layout" id="layout"></div>
+<div class="step-info" id="stepInfo"></div>
+<div class="explain" id="pairingNoteBox" style="display:none; border:1.5px solid #6C4AB6; background:#EAE3F7; color:#4A2D7E; font-weight:bold;"></div>
+
+<div class="anim-controls">
+  <button class="primary" id="playBtn">&#9654; Play: watch it collapse</button>
+  <button id="stepBtn">Step-by-step</button>
+  <button id="replayBtn">Reset view &#8635;</button>
+</div>
+
+<div class="legend">
+  <span><span class="sw" style="background:#FBE4DC; border-color:#E4572E;"></span><b style="color:#E4572E">Contract</b> — in BOTH inputs, NOT in output → summed away</span>
+  <span><span class="sw" style="background:#DCEEED; border-color:#0E7C7B;"></span><b style="color:#0E7C7B">Keep</b> — in only ONE input + output → kept as-is</span>
+  <span><span class="sw" style="background:#EAE3F7; border-color:#6C4AB6;"></span><b style="color:#6C4AB6">Batch</b> — in BOTH inputs AND output → matched per-position</span>
+</div>
+
+<div class="explain" id="explainText"></div>
+
+<div class="note">
+  The reading procedure, every time: find letters shared between inputs. If a shared letter is
+  <b>absent</b> from the output → summed over (contracted). If a shared letter <b>is</b> in the output → batch dimension. Any letter in only one input → kept.
+</div>
+
+<script>
+  const modes = {
+    contract: {
+      display: 'einsum(A, B, "i j, j k -> i k")',
+      leftLabel: 'A — shape (i=3, j=2)', rightLabel: 'B — shape (j=2, k=3)', outLabel: 'output — shape (i=3, k=3)',
+      leftDims:[3,2], rightDims:[2,3],
+      // Cell classification: [row_type, col_type] for each tensor
+      leftRowType: 'keep', leftColType: 'contract',    // rows=i(keep), cols=j(contract)
+      rightRowType: 'contract', rightColType: 'keep',   // rows=j(contract), cols=k(keep)
+      leftRowLabel: 'i', leftColLabel: 'j', rightRowLabel: 'j', rightColLabel: 'k',
+      collapseDir: 'col-left-row-right',  // j-columns in A and j-rows in B collapse
+      explain: "j appears in BOTH A and B, but NOT in the output — so j gets SUMMED over (red cells collapse). i and k each appear in only one input plus the output (green cells stay). Each output[i,k] = sum over j of A[i,j] × B[j,k].",
+      pairingNote: null
+    },
+    batch: {
+      display: 'einsum(A, B, "b i, b i -> b")',
+      leftLabel: 'A — shape (b=3, i=4)', rightLabel: 'B — shape (b=3, i=4)', outLabel: 'output — shape (b=3,)',
+      leftDims:[3,4], rightDims:[3,4],
+      leftRowType: 'batch', leftColType: 'contract',
+      rightRowType: 'batch', rightColType: 'contract',
+      leftRowLabel: 'b', leftColLabel: 'i', rightRowLabel: 'b', rightColLabel: 'i',
+      collapseDir: 'cols-both',
+      explain: "b appears in BOTH inputs AND the output (purple = batch: row 0↔row 0 only). i appears in both inputs but NOT the output (red = contracted: dot product along i per batch row). Result: one dot product per batch example.",
+      pairingNote: "THE PART THAT'S EASY TO MISS: b is a BATCH dimension, not a contracted one — row b=0 of A is ONLY ever multiplied with row b=0 of B, b=1 only with b=1, and so on. Rows never cross. That's the difference between \"batch\" and \"contract\": contracted dimensions get summed together; batch dimensions stay strictly matched, position for position."
+    },
+    outer: {
+      display: 'einsum(Q, K, "q h, k h -> q k")',
+      leftLabel: 'Q — shape (q=3, h=2)', rightLabel: 'K — shape (k=3, h=2)', outLabel: 'output — shape (q=3, k=3)',
+      leftDims:[3,2], rightDims:[3,2],
+      leftRowType: 'keep', leftColType: 'contract',
+      rightRowType: 'keep', rightColType: 'contract',
+      leftRowLabel: 'q', leftColLabel: 'h', rightRowLabel: 'k', rightColLabel: 'h',
+      collapseDir: 'cols-both',
+      explain: "h appears in both inputs but NOT the output → contracted (red cells, dot product along hidden dim). q and k each appear in only one input and ARE in the output (green = kept). Every q pairs with every k → one score per (query, key) pair. This IS attention.",
+      pairingNote: "THE PART THAT'S EASY TO MISS: q and k are NOT shared between Q and K at all — they're two completely different letters. With no shared non-contracted letter to \"batch-match,\" EVERY row of Q pairs with EVERY row of K — all 3×3=9 combinations. That's exactly why attention produces a full grid of scores (one per query-key pair), not just 3 numbers like the batch case did."
+    }
+  };
+
+  let currentMode = 'contract';
+  let animStep = 0;
+
+  function renderEinsumStr(mode) {
+    const el = document.getElementById('einsumStr');
+    let quoted;
+    if (mode==='contract') quoted = `<span class="letter keep">i</span> <span class="letter contract">j</span> , <span class="letter contract">j</span> <span class="letter keep">k</span>  →  <span class="letter keep">i</span> <span class="letter keep">k</span>`;
+    if (mode==='batch') quoted = `<span class="letter batch">b</span> <span class="letter contract">i</span> , <span class="letter batch">b</span> <span class="letter contract">i</span>  →  <span class="letter batch">b</span>`;
+    if (mode==='outer') quoted = `<span class="letter keep">q</span> <span class="letter contract">h</span> , <span class="letter keep">k</span> <span class="letter contract">h</span>  →  <span class="letter keep">q</span> <span class="letter keep">k</span>`;
+    el.innerHTML = `einsum( A, B, " ${quoted} " )`;
+  }
+
+  function genGrid(rows, cols) {
+    const g = [];
+    for (let r=0;r<rows;r++) { const row=[]; for (let c=0;c<cols;c++) row.push(+(Math.sin(r*3+c*7+1)*3+5).toFixed(1)); g.push(row); }
+    return g;
+  }
+
+  function computeOutput(mode, A, B) {
+    if (mode === 'contract') {
+      const out = [];
+      for (let i=0;i<A.length;i++) { const row=[]; for (let k=0;k<B[0].length;k++) { let s=0; for (let j=0;j<A[0].length;j++) s+=A[i][j]*B[j][k]; row.push(+s.toFixed(1)); } out.push(row); }
+      return out;
+    }
+    if (mode === 'batch') {
+      const row = [];
+      for (let b=0;b<A.length;b++) { let s=0; for (let i=0;i<A[0].length;i++) s+=A[b][i]*B[b][i]; row.push(+s.toFixed(1)); }
+      return [row];
+    }
+    if (mode === 'outer') {
+      const out = [];
+      for (let q=0;q<A.length;q++) { const row=[]; for (let k=0;k<B.length;k++) { let s=0; for (let h=0;h<A[0].length;h++) s+=A[q][h]*B[k][h]; row.push(+s.toFixed(1)); } out.push(row); }
+      return out;
+    }
+  }
+
+  function cellClass(rowType, colType) {
+    // If both axes are same type, use that. Otherwise color by the "more interesting" axis.
+    if (rowType === 'contract' && colType === 'contract') return 'contract-col';
+    if (rowType === 'contract') return 'contract-row';
+    if (colType === 'contract') return 'contract-col';
+    if (rowType === 'batch') return 'batch-cell';
+    if (colType === 'batch') return 'batch-cell';
+    return 'keep-col';
+  }
+
+  function axisLabelClass(type) {
+    if (type === 'contract') return 'axis-label contract-ax';
+    if (type === 'batch') return 'axis-label batch-ax';
+    return 'axis-label keep-ax';
+  }
+
+  let currentA, currentB, currentOut;
+
+  function render(mode) {
+    currentMode = mode;
+    animStep = 0;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.mode===mode));
+    renderEinsumStr(mode);
+    const m = modes[mode];
+    currentA = genGrid(m.leftDims[0], m.leftDims[1]);
+    currentB = genGrid(m.rightDims[0], m.rightDims[1]);
+    currentOut = computeOutput(mode, currentA, currentB);
+
+    const layout = document.getElementById('layout');
+    layout.innerHTML = `
+      <div class="tensor-block">
+        <div class="tensor-label">${m.leftLabel}</div>
+        <div style="display:flex; align-items:flex-start;">
+          <div class="axis-labels-col" id="leftRowLabels"></div>
+          <div>
+            <div class="axis-labels-row" id="leftColLabels"></div>
+            ${buildColoredGrid(currentA, 'gridA', m.leftDims[1], m.leftRowType, m.leftColType)}
+          </div>
+        </div>
+      </div>
+      <div class="arrow-label">×</div>
+      <div class="tensor-block">
+        <div class="tensor-label">${m.rightLabel}</div>
+        <div style="display:flex; align-items:flex-start;">
+          <div class="axis-labels-col" id="rightRowLabels"></div>
+          <div>
+            <div class="axis-labels-row" id="rightColLabels"></div>
+            ${buildColoredGrid(currentB, 'gridB', m.rightDims[1], m.rightRowType, m.rightColType)}
+          </div>
+        </div>
+      </div>
+      <div class="arrow-label">→</div>
+      <div class="tensor-block">
+        <div class="out-wrap" id="outWrap">
+          <div class="tensor-label">${m.outLabel}</div>
+          ${buildOutputGrid(currentOut, 'gridOut', currentOut[0].length)}
+        </div>
+      </div>
+    `;
+
+    // Add axis labels
+    const leftColLabels = document.getElementById('leftColLabels');
+    for (let c=0;c<m.leftDims[1];c++) {
+      leftColLabels.innerHTML += `<span class="${axisLabelClass(m.leftColType)}">${m.leftColLabel}${c}</span>`;
+    }
+    const leftRowLabels = document.getElementById('leftRowLabels');
+    leftRowLabels.style.marginTop = '28px'; // offset for col labels
+    for (let r=0;r<m.leftDims[0];r++) {
+      leftRowLabels.innerHTML += `<span class="${axisLabelClass(m.leftRowType)}" style="display:block;height:46px;line-height:46px;margin-bottom:2px;">${m.leftRowLabel}${r}</span>`;
+    }
+    const rightColLabels = document.getElementById('rightColLabels');
+    for (let c=0;c<m.rightDims[1];c++) {
+      rightColLabels.innerHTML += `<span class="${axisLabelClass(m.rightColType)}">${m.rightColLabel}${c}</span>`;
+    }
+    const rightRowLabels = document.getElementById('rightRowLabels');
+    rightRowLabels.style.marginTop = '28px';
+    for (let r=0;r<m.rightDims[0];r++) {
+      rightRowLabels.innerHTML += `<span class="${axisLabelClass(m.rightRowType)}" style="display:block;height:46px;line-height:46px;margin-bottom:2px;">${m.rightRowLabel}${r}</span>`;
+    }
+
+    document.getElementById('explainText').textContent = m.explain;
+    document.getElementById('stepInfo').textContent = '';
+    document.getElementById('pairingNoteBox').style.display = 'none';
+    document.getElementById('playBtn').disabled = false;
+    document.getElementById('playBtn').textContent = '▶ Play: watch it collapse';
+    document.getElementById('stepBtn').disabled = false;
+  }
+
+  function buildColoredGrid(grid, id, cols, rowType, colType) {
+    let html = `<div class="dgrid" id="${id}" style="grid-template-columns:repeat(${cols},52px);">`;
+    for (let r=0;r<grid.length;r++) {
+      for (let c=0;c<grid[r].length;c++) {
+        const cls = cellClass(rowType, colType);
+        html += `<div class="dcell ${cls}" data-row="${r}" data-col="${c}">${grid[r][c].toFixed(1)}</div>`;
+      }
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function buildOutputGrid(grid, id, cols) {
+    let html = `<div class="dgrid" id="${id}" style="grid-template-columns:repeat(${cols},52px);">`;
+    for (let r=0;r<grid.length;r++) {
+      for (let c=0;c<grid[r].length;c++) {
+        html += `<div class="dcell" data-row="${r}" data-col="${c}">${grid[r][c].toFixed(1)}</div>`;
+      }
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function play() {
+    const m = modes[currentMode];
+    const btn = document.getElementById('playBtn');
+    btn.disabled = true;
+    document.getElementById('stepBtn').disabled = true;
+    const outWrap = document.getElementById('outWrap');
+    const pairingBox = document.getElementById('pairingNoteBox');
+    outWrap.classList.add('pending');
+    pairingBox.style.display = 'none';
+
+    document.getElementById('stepInfo').textContent = 'Red cells are being summed over...';
+
+    const pairingDelay = m.pairingNote ? 900 : 0;
+    if (m.pairingNote) {
+      setTimeout(() => {
+        pairingBox.style.display = 'block';
+        pairingBox.textContent = m.pairingNote;
+        document.getElementById('stepInfo').textContent = 'Which rows actually pair with which — the confusing part...';
+      }, 400);
+    }
+
+    // Animate: first highlight, then (after the pairing note, if any) collapse
+    setTimeout(() => {
+      pairingBox.style.display = 'none';
+      const gridA = document.getElementById('gridA');
+      const gridB = document.getElementById('gridB');
+
+      // Collapse the contracted dimension
+      if (m.collapseDir === 'col-left-row-right') {
+        // A's columns (j) collapse, B's rows (j) collapse
+        gridA.querySelectorAll('.dcell').forEach(cell => {
+          if (cell.classList.contains('contract-col')) cell.classList.add('collapsing-col');
+        });
+        gridB.querySelectorAll('.dcell').forEach(cell => {
+          if (cell.classList.contains('contract-row')) cell.classList.add('collapsing');
+        });
+      } else {
+        // Both grids: columns collapse
+        gridA.querySelectorAll('.dcell').forEach(cell => {
+          if (cell.classList.contains('contract-col')) cell.classList.add('collapsing-col');
+        });
+        gridB.querySelectorAll('.dcell').forEach(cell => {
+          if (cell.classList.contains('contract-col')) cell.classList.add('collapsing-col');
+        });
+      }
+      document.getElementById('stepInfo').textContent = 'Red dimension collapses (summed away)...';
+    }, 400 + pairingDelay);
+
+    setTimeout(() => {
+      outWrap.classList.remove('pending');
+      document.getElementById('stepInfo').textContent = 'Green/purple dimensions survive → output appears!';
+    }, 1100 + pairingDelay);
+    setTimeout(() => { btn.textContent = 'Done ✓'; }, 1600 + pairingDelay);
+  }
+
+  function stepThrough() {
+    const m = modes[currentMode];
+    const gridA = document.getElementById('gridA');
+    const gridB = document.getElementById('gridB');
+    const outWrap = document.getElementById('outWrap');
+    const pairingBox = document.getElementById('pairingNoteBox');
+    const hasPairingStep = !!m.pairingNote;
+    // step numbering: with a pairing note, insert it as step 2, pushing collapse->3, reveal->4
+    const collapseStep = hasPairingStep ? 3 : 2;
+    const revealStep = hasPairingStep ? 4 : 3;
+
+    animStep++;
+    if (animStep === 1) {
+      outWrap.classList.add('pending');
+      pairingBox.style.display = 'none';
+      document.getElementById('stepInfo').textContent = 'Step 1: Red cells = shared dimension NOT in output → these will be summed away';
+    } else if (hasPairingStep && animStep === 2) {
+      pairingBox.style.display = 'block';
+      pairingBox.textContent = m.pairingNote;
+      document.getElementById('stepInfo').textContent = 'Step 2: which rows actually pair with which — the confusing part, slow down here';
+    } else if (animStep === collapseStep) {
+      pairingBox.style.display = 'none';
+      if (m.collapseDir === 'col-left-row-right') {
+        gridA.querySelectorAll('.contract-col').forEach(c => c.classList.add('collapsing-col'));
+        gridB.querySelectorAll('.contract-row').forEach(c => c.classList.add('collapsing'));
+      } else {
+        gridA.querySelectorAll('.contract-col').forEach(c => c.classList.add('collapsing-col'));
+        gridB.querySelectorAll('.contract-col').forEach(c => c.classList.add('collapsing-col'));
+      }
+      document.getElementById('stepInfo').textContent = `Step ${collapseStep}: Contracted dimension collapses — multiplied and summed`;
+    } else if (animStep === revealStep) {
+      outWrap.classList.remove('pending');
+      document.getElementById('stepInfo').textContent = `Step ${revealStep}: Green/purple dimensions survive → output tensor!`;
+      document.getElementById('stepBtn').disabled = true;
+      document.getElementById('playBtn').disabled = true;
+      document.getElementById('playBtn').textContent = 'Done ✓';
+    }
+  }
+
+  document.getElementById('playBtn').addEventListener('click', play);
+  document.getElementById('stepBtn').addEventListener('click', stepThrough);
+  document.getElementById('replayBtn').addEventListener('click', () => render(currentMode));
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => render(t.dataset.mode)));
+  render('contract');
+</script>
+
+</body>
+</html>

@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Distribution Transform Explorer — TARA</title>
+<style>
+  :root { --teal:#0E7C7B; --teal-lt:#DCEEED; --coral:#E4572E; --coral-lt:#FBE4DC; --purple:#6C4AB6; --purple-lt:#EFE9FA; --grey:#8A8A8A; --grey-line:#D8D8D8; --bg:#F7F7F7; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI",Arial,sans-serif; margin:0; padding:24px 36px; background:#fff; color:#1A1A1A; }
+  h1 { font-size:22px; margin:0 0 2px 0; }
+  .subtitle { color:var(--grey); font-size:13px; margin-bottom:16px; }
+
+  .tabs { display:flex; gap:8px; margin-bottom:18px; }
+  .tab { padding:9px 18px; border-radius:8px; border:1.5px solid var(--grey-line); background:#fff; font-size:13.5px; font-weight:bold; cursor:pointer; color:#555; }
+  .tab.active { background:var(--teal); color:#fff; border-color:var(--teal); }
+
+  .panel { display:none; }
+  .panel.active { display:block; }
+
+  .layout { display:flex; gap:24px; align-items:flex-start; }
+  .chart-col { flex:1.5; }
+  .side-col { flex:1; min-width:280px; }
+
+  svg { background:var(--bg); border-radius:10px; border:1.5px solid var(--grey-line); }
+
+  .slider-row { margin-bottom:16px; }
+  .slider-row label { display:flex; justify-content:space-between; font-size:12.5px; font-weight:bold; margin-bottom:4px; }
+  .slider-row .val { font-family:"Courier New",monospace; color:var(--teal); }
+  input[type=range] { width:100%; accent-color:var(--teal); }
+
+  .metric-box { background:var(--bg); border-radius:10px; padding:14px 16px; border:1.5px solid var(--grey-line); margin-top:12px; }
+  .metric-box .lbl { font-size:11px; color:var(--grey); text-transform:uppercase; letter-spacing:0.5px; }
+  .metric-box .val { font-family:"Courier New",monospace; font-size:22px; font-weight:bold; color:var(--coral); }
+  .metric-box .val.good { color:var(--teal); }
+
+  .legend { display:flex; gap:16px; margin-top:10px; flex-wrap:wrap; }
+  .legend-item { display:flex; align-items:center; gap:6px; font-size:11.5px; }
+  .legend-swatch { width:16px; height:3px; border-radius:2px; }
+  .legend-swatch.dash { background: repeating-linear-gradient(90deg, currentColor 0 5px, transparent 5px 9px); }
+
+  button.reset { margin-top:14px; font-size:12.5px; padding:7px 14px; border-radius:7px; border:1.5px solid var(--grey-line); background:#fff; cursor:pointer; }
+  .note { margin-top:16px; background:#FFF9E0; border:1.5px solid #FFE01B; border-radius:8px; padding:12px 15px; font-size:12px; font-style:italic; }
+  .toggle-row { display:flex; align-items:center; gap:10px; margin:14px 0; }
+  .toggle { width:44px; height:24px; border-radius:12px; background:var(--grey-line); position:relative; cursor:pointer; transition:background 0.2s; }
+  .toggle.on { background:var(--purple); }
+  .toggle .knob { width:18px; height:18px; border-radius:50%; background:#fff; position:absolute; top:3px; left:3px; transition:left 0.2s; box-shadow:0 1px 3px rgba(0,0,0,0.3); }
+  .toggle.on .knob { left:23px; }
+</style>
+</head>
+<body>
+
+<h1>Distribution Transform Explorer</h1>
+<div class="subtitle">TARA · Week 2 · Fundamentals — drag the weights, watch the output distribution move</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="one">1 Input → 1 Output</div>
+  <div class="tab" data-tab="two">2 Inputs → 1 Output</div>
+  <div class="tab" data-tab="uat">Activation: Why Linear Isn't Enough</div>
+</div>
+
+<!-- ============ TAB 1: ONE INPUT ============ -->
+<div class="panel active" id="panel-one">
+  <div class="layout">
+    <div class="chart-col">
+      <div style="font-size:11px; font-weight:bold; color:#8A8A8A; margin-bottom:4px;">THE MAPPING ITSELF — every X becomes which Y?</div>
+      <svg id="lineOne" width="620" height="190" viewBox="0 0 620 190" style="margin-bottom:12px;"></svg>
+      <div style="font-size:11px; font-weight:bold; color:#8A8A8A; margin-bottom:4px;">WHAT THAT DOES TO THE WHOLE DISTRIBUTION</div>
+      <svg id="chartOne" width="620" height="260" viewBox="0 0 620 260"></svg>
+    </div>
+    <div class="side-col">
+      <div class="slider-row">
+        <label>W (scale) <span class="val" id="wOneVal">1.0</span></label>
+        <input type="range" id="wOne" min="-3" max="3" step="0.05" value="1.0">
+      </div>
+      <div class="slider-row">
+        <label>b (shift) <span class="val" id="bOneVal">0.0</span></label>
+        <input type="range" id="bOne" min="-6" max="6" step="0.1" value="0.0">
+      </div>
+      <div class="metric-box">
+        <div class="lbl">distance to target (lower = better fit)</div>
+        <div class="val" id="distOne">—</div>
+      </div>
+      <button class="reset" id="resetOne">Reset sliders</button>
+      <div class="note" id="noteOne">Move W first, then b — notice W changes the SPREAD (variance) of the output, while b only slides the CENTER. You need both to match a target that's both wider and shifted.</div>
+      <div class="note" style="background:#EFE9FA; border-color:#6C4AB6;"><strong>Why this always works for Gaussian → Gaussian:</strong> W·X+b is just SCALE (by W) then SHIFT (by b) — an affine map. A Gaussian, scaled and shifted, is provably still exactly a Gaussian. That's the whole reason linear is enough here: it can reach any mean and any variance, and that's all a Gaussian's shape has.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ TAB 2: TWO INPUTS ============ -->
+<div class="panel" id="panel-two">
+  <div class="layout">
+    <div class="chart-col">
+      <div style="font-size:11px; font-weight:bold; color:#8A8A8A; margin-bottom:4px;">THE MAPPING ITSELF — each input's own line</div>
+      <svg id="lineTwo" width="620" height="190" viewBox="0 0 620 190" style="margin-bottom:12px;"></svg>
+      <div style="font-size:11px; font-weight:bold; color:#8A8A8A; margin-bottom:4px;">WHAT THAT DOES TO THE WHOLE DISTRIBUTION</div>
+      <svg id="chartTwo" width="620" height="260" viewBox="0 0 620 260"></svg>
+    </div>
+    <div class="side-col">
+      <div class="slider-row">
+        <label>W_A (weight on A) <span class="val" id="wAVal">1.0</span></label>
+        <input type="range" id="wA" min="-2" max="2" step="0.05" value="1.0">
+      </div>
+      <div class="slider-row">
+        <label>W_B (weight on B) <span class="val" id="wBVal">1.0</span></label>
+        <input type="range" id="wB" min="-2" max="2" step="0.05" value="1.0">
+      </div>
+      <div class="slider-row">
+        <label>b (shift) <span class="val" id="bTwoVal">0.0</span></label>
+        <input type="range" id="bTwo" min="-6" max="6" step="0.1" value="0.0">
+      </div>
+      <div class="metric-box">
+        <div class="lbl">distance to target</div>
+        <div class="val" id="distTwo">—</div>
+      </div>
+      <button class="reset" id="resetTwo">Reset sliders</button>
+      <div class="note" id="noteTwo">Two independent Gaussians add their VARIANCES when combined (not their spreads directly) — that's why the output is usually narrower relative to its mean than you might expect.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ TAB 3: UAT / ACTIVATION ============ -->
+<div class="panel" id="panel-uat">
+  <div class="layout">
+    <div class="chart-col">
+      <div style="font-size:11px; font-weight:bold; color:#8A8A8A; margin-bottom:4px;">THE MAPPING ITSELF — bends once activation is on</div>
+      <svg id="lineUat" width="620" height="190" viewBox="0 0 620 190" style="margin-bottom:12px;"></svg>
+      <div style="font-size:11px; font-weight:bold; color:#8A8A8A; margin-bottom:4px;">WHAT THAT DOES TO THE WHOLE DISTRIBUTION</div>
+      <svg id="chartUat" width="620" height="260" viewBox="0 0 620 260"></svg>
+    </div>
+    <div class="side-col">
+      <div class="slider-row">
+        <label>W (scale) <span class="val" id="wUatVal">1.0</span></label>
+        <input type="range" id="wUat" min="-3" max="3" step="0.05" value="1.0">
+      </div>
+      <div class="slider-row">
+        <label>b (shift) <span class="val" id="bUatVal">0.0</span></label>
+        <input type="range" id="bUat" min="-6" max="6" step="0.1" value="0.0">
+      </div>
+      <div class="toggle-row">
+        <div class="toggle" id="actToggle"><div class="knob"></div></div>
+        <span style="font-size:13px; font-weight:bold;">Apply activation (ReLU-fold)</span>
+      </div>
+      <div class="metric-box">
+        <div class="lbl">can a linear map hit this target?</div>
+        <div class="val" id="uatVerdict">—</div>
+      </div>
+      <div class="note" id="noteUat">The target this time is TWO-HUMPED (bimodal) — something a single linear transform can NEVER produce, no matter what W and b you pick, because scaling+shifting a bell curve always leaves it a single bell curve. Flip the activation toggle on and watch what becomes possible.</div>
+      <div class="note" style="background:#EFE9FA; border-color:#6C4AB6;"><strong>The link back to Tab 1:</strong> linear (W·X+b) can only ever SCALE and SHIFT — that's it, two knobs, mean and variance. It can never change the SHAPE of the distribution. A single bell curve, however scaled or shifted, is still one bell curve. Getting a genuinely different shape (two humps) needs something non-linear — that's exactly what the activation toggle adds.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function gauss(x, mu, sigma) {
+    return Math.exp(-((x - mu) ** 2) / (2 * sigma * sigma)) / (sigma * Math.sqrt(2 * Math.PI));
+  }
+  function bimodal(x, m1, m2, s) {
+    return 0.5 * gauss(x, m1, s) + 0.5 * gauss(x, m2, s);
+  }
+
+  const W = 620, HD = 260, padL = 40, padB = 34, padT = 20, padR = 16;
+  const plotW = W - padL - padR;
+
+  // dynamic range: fit ALL given (mean, sigma) pairs comfortably, so nothing ever clips off-screen
+  function fitRange(specs) {
+    let lo = Infinity, hi = -Infinity;
+    specs.forEach(([mu, sigma]) => { lo = Math.min(lo, mu - 3.2 * sigma); hi = Math.max(hi, mu + 3.2 * sigma); });
+    const span = Math.max(hi - lo, 8);
+    const mid = (hi + lo) / 2;
+    return [mid - span / 2, mid + span / 2];
+  }
+  function sx(v, xMin, xMax) { return padL + ((v - xMin) / (xMax - xMin)) * plotW; }
+
+  function drawAxes(xMin, xMax, h) {
+    h = h || HD;
+    let s = `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h - padB}" stroke="#D8D8D8" stroke-width="1.5"/>`;
+    s += `<line x1="${padL}" y1="${h - padB}" x2="${W - padR}" y2="${h - padB}" stroke="#D8D8D8" stroke-width="1.5"/>`;
+    const step = (xMax - xMin) > 30 ? 10 : (xMax - xMin) > 15 ? 5 : 2;
+    const start = Math.ceil(xMin / step) * step;
+    for (let t = start; t <= xMax; t += step) {
+      s += `<line x1="${sx(t,xMin,xMax)}" y1="${padT}" x2="${sx(t,xMin,xMax)}" y2="${h-padB}" stroke="#EEEEEE" stroke-width="1"/>`;
+      s += `<text x="${sx(t,xMin,xMax)}" y="${h - padB + 16}" text-anchor="middle" font-size="10" fill="#8A8A8A">${t}</text>`;
+    }
+    return s;
+  }
+
+  function curvePath(fn, yScale, xMin, xMax, h) {
+    h = h || HD;
+    let d = '';
+    for (let i = 0; i <= 140; i++) {
+      const xv = xMin + (i / 140) * (xMax - xMin);
+      const yv = fn(xv);
+      const px = sx(xv, xMin, xMax);
+      const py = (h - padB) - yv * yScale;
+      d += (i === 0 ? 'M' : 'L') + px.toFixed(1) + ',' + Math.max(padT, py).toFixed(1) + ' ';
+    }
+    return d;
+  }
+  function filledArea(fn, yScale, color, opacity, xMin, xMax, h) {
+    h = h || HD;
+    let d = 'M' + sx(xMin,xMin,xMax) + ',' + (h - padB);
+    for (let i = 0; i <= 140; i++) {
+      const xv = xMin + (i / 140) * (xMax - xMin);
+      const yv = fn(xv);
+      const px = sx(xv, xMin, xMax);
+      const py = (h - padB) - yv * yScale;
+      d += ' L' + px.toFixed(1) + ',' + Math.max(padT, py).toFixed(1);
+    }
+    d += ' L' + sx(xMax,xMin,xMax) + ',' + (h - padB) + ' Z';
+    return `<path d="${d}" fill="${color}" opacity="${opacity}"/>`;
+  }
+  // label placed just above a curve's peak, nudged to stay on-screen
+  function peakLabel(text, mu, sigma, fn, yScale, color, xMin, xMax, dy, h) {
+    h = h || HD; dy = dy || 0;
+    const peakY = (h - padB) - fn(mu) * yScale - 10 - dy;
+    let px = sx(mu, xMin, xMax);
+    px = Math.max(padL + 4, Math.min(W - padR - 4, px));
+    return `<text x="${px}" y="${Math.max(padT + 12, peakY)}" text-anchor="middle" font-size="12" font-weight="bold" fill="${color}">${text}</text>`;
+  }
+  function transformBanner(text) {
+    return `<rect x="${padL}" y="4" width="${plotW}" height="16" fill="none"/>` +
+      `<text x="${padL}" y="15" font-size="12" font-family="Courier New,monospace" font-weight="bold" fill="#1A1A1A">${text}</text>`;
+  }
+
+  // ===================== FUNCTION-LINE PLOT (the actual mapping X -> Y) =====================
+  const HL = 190, padLL = 44, padBL = 30, padTL = 14, padRL = 16;
+  const plotWL = W - padLL - padRL, plotHL = HL - padTL - padBL;
+  function sxL(v, xMin, xMax) { return padLL + ((v - xMin) / (xMax - xMin)) * plotWL; }
+  function syL(v, yMin, yMax) { return (HL - padBL) - ((v - yMin) / (yMax - yMin)) * plotHL; }
+
+  function drawLineAxes(xMin, xMax, yMin, yMax, xLab, yLab) {
+    let s = `<line x1="${padLL}" y1="${padTL}" x2="${padLL}" y2="${HL - padBL}" stroke="#D8D8D8" stroke-width="1.5"/>`;
+    s += `<line x1="${padLL}" y1="${HL - padBL}" x2="${W - padRL}" y2="${HL - padBL}" stroke="#D8D8D8" stroke-width="1.5"/>`;
+    // zero lines if in range
+    if (xMin < 0 && xMax > 0) s += `<line x1="${sxL(0,xMin,xMax)}" y1="${padTL}" x2="${sxL(0,xMin,xMax)}" y2="${HL-padBL}" stroke="#EEEEEE" stroke-width="1"/>`;
+    if (yMin < 0 && yMax > 0) s += `<line x1="${padLL}" y1="${syL(0,yMin,yMax)}" x2="${W-padRL}" y2="${syL(0,yMin,yMax)}" stroke="#EEEEEE" stroke-width="1"/>`;
+    const xStep = Math.max(1, Math.round((xMax - xMin) / 8));
+    for (let t = Math.ceil(xMin / xStep) * xStep; t <= xMax; t += xStep) {
+      s += `<text x="${sxL(t,xMin,xMax)}" y="${HL - padBL + 15}" text-anchor="middle" font-size="9.5" fill="#8A8A8A">${t}</text>`;
+    }
+    s += `<text x="${W/2}" y="${HL-4}" text-anchor="middle" font-size="10.5" fill="#8A8A8A">${xLab}</text>`;
+    s += `<text x="10" y="${padTL+4}" font-size="10.5" fill="#8A8A8A">${yLab}</text>`;
+    return s;
+  }
+  function linePath(fn, xMin, xMax, yMin, yMax) {
+    let d = '';
+    for (let i = 0; i <= 80; i++) {
+      const xv = xMin + (i / 80) * (xMax - xMin);
+      const yv = Math.max(yMin - 2, Math.min(yMax + 2, fn(xv)));
+      d += (i === 0 ? 'M' : 'L') + sxL(xv,xMin,xMax).toFixed(1) + ',' + syL(yv,yMin,yMax).toFixed(1) + ' ';
+    }
+    return d;
+  }
+  // marks one (x0, fn(x0)) point with dashed guide lines to both axes
+  function markPoint(x0, fn, xMin, xMax, yMin, yMax, color, label) {
+    const y0 = fn(x0);
+    const px = sxL(x0, xMin, xMax), py = syL(y0, yMin, yMax);
+    let s = `<line x1="${px}" y1="${py}" x2="${px}" y2="${HL - padBL}" stroke="${color}" stroke-width="1.5" stroke-dasharray="3,3"/>`;
+    s += `<line x1="${padLL}" y1="${py}" x2="${px}" y2="${py}" stroke="${color}" stroke-width="1.5" stroke-dasharray="3,3"/>`;
+    s += `<circle cx="${px}" cy="${py}" r="4.5" fill="${color}"/>`;
+    s += `<text x="${px + 8}" y="${py - 8}" font-size="10.5" font-weight="bold" fill="${color}">${label}</text>`;
+    return s;
+  }
+
+  const YSCALE = 620;
+
+  // ---------- TAB 1: one input ----------
+  const inMu1 = -4, inSigma1 = 1.3;
+  const targetMu1 = 3, targetSigma1 = 2.5;
+  function renderOneLine(w, b, xMin, xMax) {
+    const fn = (x) => w * x + b;
+    const yAtXmin = fn(xMin), yAtXmax = fn(xMax);
+    const yMin = Math.min(yAtXmin, yAtXmax, targetMu1 - 1) - 2, yMax = Math.max(yAtXmin, yAtXmax, targetMu1 + 1) + 2;
+    let s = drawLineAxes(xMin, xMax, yMin, yMax, 'X (input value)', 'Y_pred');
+    s += `<path d="${linePath(fn, xMin, xMax, yMin, yMax)}" fill="none" stroke="#E4572E" stroke-width="3"/>`;
+    s += markPoint(inMu1, fn, xMin, xMax, yMin, yMax, '#E4572E', `X=${inMu1} → Y=${fn(inMu1).toFixed(1)}`);
+    document.getElementById('lineOne').innerHTML = s;
+  }
+  function renderOne() {
+    const w = parseFloat(document.getElementById('wOne').value);
+    const b = parseFloat(document.getElementById('bOne').value);
+    document.getElementById('wOneVal').textContent = w.toFixed(2);
+    document.getElementById('bOneVal').textContent = b.toFixed(1);
+    const outMu = w * inMu1 + b, outSigma = Math.max(0.15, Math.abs(w) * inSigma1);
+    const [xMin, xMax] = fitRange([[inMu1, inSigma1], [targetMu1, targetSigma1], [outMu, outSigma]]);
+    renderOneLine(w, b, xMin, xMax);
+    let svgHtml = drawAxes(xMin, xMax);
+    svgHtml += transformBanner(`Y_pred = ${w.toFixed(2)} · X + ${b.toFixed(1)}`);
+    svgHtml += filledArea((x) => gauss(x, inMu1, inSigma1), YSCALE, '#0E7C7B', 0.3, xMin, xMax);
+    svgHtml += `<path d="${curvePath((x) => gauss(x, inMu1, inSigma1), YSCALE, xMin, xMax)}" fill="none" stroke="#0E7C7B" stroke-width="2.5"/>`;
+    svgHtml += `<path d="${curvePath((x) => gauss(x, targetMu1, targetSigma1), YSCALE, xMin, xMax)}" fill="none" stroke="#6C4AB6" stroke-width="2.5" stroke-dasharray="6,5"/>`;
+    svgHtml += filledArea((x) => gauss(x, outMu, outSigma), YSCALE, '#E4572E', 0.3, xMin, xMax);
+    svgHtml += `<path d="${curvePath((x) => gauss(x, outMu, outSigma), YSCALE, xMin, xMax)}" fill="none" stroke="#E4572E" stroke-width="2.5"/>`;
+    svgHtml += peakLabel('P(X) — input', inMu1, inSigma1, (x) => gauss(x, inMu1, inSigma1), YSCALE, '#0E7C7B', xMin, xMax);
+    svgHtml += peakLabel('target P(Y)', targetMu1, targetSigma1, (x) => gauss(x, targetMu1, targetSigma1), YSCALE, '#6C4AB6', xMin, xMax);
+    svgHtml += peakLabel('your P(Y_pred)', outMu, outSigma, (x) => gauss(x, outMu, outSigma), YSCALE, '#E4572E', xMin, xMax, Math.abs(outMu - targetMu1) < 1.5 ? 22 : 0);
+    document.getElementById('chartOne').innerHTML = svgHtml;
+    const dist = Math.sqrt((outMu - targetMu1) ** 2 + (outSigma - targetSigma1) ** 2);
+    const distEl = document.getElementById('distOne');
+    distEl.textContent = dist.toFixed(2);
+    distEl.className = 'val' + (dist < 0.4 ? ' good' : '');
+    if (dist < 0.4) document.getElementById('noteOne').textContent = "Nice — you've matched the target distribution. Notice this took BOTH a specific W (to get the spread right) and a specific b (to get the center right).";
+  }
+  ['wOne', 'bOne'].forEach((id) => document.getElementById(id).addEventListener('input', renderOne));
+  document.getElementById('resetOne').addEventListener('click', () => {
+    document.getElementById('wOne').value = 1.0; document.getElementById('bOne').value = 0.0; renderOne();
+  });
+
+  // ---------- TAB 2: two inputs ----------
+  const muA = -5, sigA = 1.1, muB = 4, sigB = 1.6;
+  const targetMu2 = 2, targetSigma2 = 2.2;
+  function renderTwoLine(wA, wB, b, xMin, xMax) {
+    const fnA = (x) => wA * x, fnB = (x) => wB * x;
+    const yMin = Math.min(fnA(xMin), fnA(xMax), fnB(xMin), fnB(xMax), 0) - 2;
+    const yMax = Math.max(fnA(xMin), fnA(xMax), fnB(xMin), fnB(xMax), 0) + 2;
+    let s = drawLineAxes(xMin, xMax, yMin, yMax, 'A or B (input value)', 'contribution to Y_pred');
+    s += `<path d="${linePath(fnA, xMin, xMax, yMin, yMax)}" fill="none" stroke="#0E7C7B" stroke-width="2.5"/>`;
+    s += `<path d="${linePath(fnB, xMin, xMax, yMin, yMax)}" fill="none" stroke="#6C4AB6" stroke-width="2.5"/>`;
+    s += markPoint(muA, fnA, xMin, xMax, yMin, yMax, '#0E7C7B', `W_A·A`);
+    s += markPoint(muB, fnB, xMin, xMax, yMin, yMax, '#6C4AB6', `W_B·B`);
+    s += `<text x="${W - 140}" y="${padTL + 2}" font-size="10" fill="#8A8A8A">+ b (${b.toFixed(1)}) = Y_pred</text>`;
+    document.getElementById('lineTwo').innerHTML = s;
+  }
+  function renderTwo() {
+    const wA = parseFloat(document.getElementById('wA').value);
+    const wB = parseFloat(document.getElementById('wB').value);
+    const b = parseFloat(document.getElementById('bTwo').value);
+    document.getElementById('wAVal').textContent = wA.toFixed(2);
+    document.getElementById('wBVal').textContent = wB.toFixed(2);
+    document.getElementById('bTwoVal').textContent = b.toFixed(1);
+    const outMu = wA * muA + wB * muB + b;
+    const outSigma = Math.max(0.15, Math.sqrt((wA * sigA) ** 2 + (wB * sigB) ** 2));
+    const [xMin, xMax] = fitRange([[muA, sigA], [muB, sigB], [targetMu2, targetSigma2], [outMu, outSigma]]);
+    renderTwoLine(wA, wB, b, xMin, xMax);
+    let svgHtml = drawAxes(xMin, xMax);
+    svgHtml += transformBanner(`Y_pred = ${wA.toFixed(2)}·A + ${wB.toFixed(2)}·B + ${b.toFixed(1)}`);
+    svgHtml += `<path d="${curvePath((x) => gauss(x, muA, sigA), YSCALE, xMin, xMax)}" fill="none" stroke="#0E7C7B" stroke-width="2"/>`;
+    svgHtml += `<path d="${curvePath((x) => gauss(x, muB, sigB), YSCALE, xMin, xMax)}" fill="none" stroke="#6C4AB6" stroke-width="2"/>`;
+    svgHtml += `<path d="${curvePath((x) => gauss(x, targetMu2, targetSigma2), YSCALE, xMin, xMax)}" fill="none" stroke="#1A1A1A" stroke-width="2.5" stroke-dasharray="6,5"/>`;
+    svgHtml += filledArea((x) => gauss(x, outMu, outSigma), YSCALE, '#E4572E', 0.3, xMin, xMax);
+    svgHtml += `<path d="${curvePath((x) => gauss(x, outMu, outSigma), YSCALE, xMin, xMax)}" fill="none" stroke="#E4572E" stroke-width="2.5"/>`;
+    svgHtml += peakLabel('P(A)', muA, sigA, (x) => gauss(x, muA, sigA), YSCALE, '#0E7C7B', xMin, xMax);
+    svgHtml += peakLabel('P(B)', muB, sigB, (x) => gauss(x, muB, sigB), YSCALE, '#6C4AB6', xMin, xMax);
+    svgHtml += peakLabel('target P(Y)', targetMu2, targetSigma2, (x) => gauss(x, targetMu2, targetSigma2), YSCALE, '#1A1A1A', xMin, xMax);
+    svgHtml += peakLabel('your P(Y_pred)', outMu, outSigma, (x) => gauss(x, outMu, outSigma), YSCALE, '#E4572E', xMin, xMax, 22);
+    document.getElementById('chartTwo').innerHTML = svgHtml;
+    const dist = Math.sqrt((outMu - targetMu2) ** 2 + (outSigma - targetSigma2) ** 2);
+    const distEl = document.getElementById('distTwo');
+    distEl.textContent = dist.toFixed(2);
+    distEl.className = 'val' + (dist < 0.4 ? ' good' : '');
+  }
+  ['wA', 'wB', 'bTwo'].forEach((id) => document.getElementById(id).addEventListener('input', renderTwo));
+  document.getElementById('resetTwo').addEventListener('click', () => {
+    document.getElementById('wA').value = 1.0; document.getElementById('wB').value = 1.0; document.getElementById('bTwo').value = 0.0; renderTwo();
+  });
+
+  // ---------- TAB 3: UAT / activation ----------
+  const inMu3 = 0, inSigma3 = 2.0;
+  const targetM1 = -4, targetM2 = 4, targetS = 1.3;
+  let activationOn = false;
+  function renderUatLine(w, b, xMin, xMax) {
+    const linFn = (x) => w * x + b;
+    // the "fold": y = |linear(x)| - a toy non-linearity that visibly bends the straight line
+    const foldFn = (x) => Math.abs(linFn(x)) - Math.abs(w) * 2.2;
+    const fn = activationOn ? foldFn : linFn;
+    const ys = [xMin, xMax].map((x) => fn(x)).concat([foldFn(0), linFn(0)]);
+    const yMin = Math.min(...ys) - 2, yMax = Math.max(...ys) + 2;
+    let s = drawLineAxes(xMin, xMax, yMin, yMax, 'X (input value)', activationOn ? 'activation(WX+b)' : 'WX+b');
+    s += `<path d="${linePath(fn, xMin, xMax, yMin, yMax)}" fill="none" stroke="#E4572E" stroke-width="3"/>`;
+    if (activationOn) {
+      s += `<text x="${W - 210}" y="${padTL + 2}" font-size="10" fill="#8A8A8A">the fold IS the non-linearity</text>`;
+    }
+    document.getElementById('lineUat').innerHTML = s;
+  }
+  function renderUat() {
+    const w = parseFloat(document.getElementById('wUat').value);
+    const b = parseFloat(document.getElementById('bUat').value);
+    document.getElementById('wUatVal').textContent = w.toFixed(2);
+    document.getElementById('bUatVal').textContent = b.toFixed(1);
+    let outFn, outMu, outSigma;
+    if (!activationOn) {
+      outMu = w * inMu3 + b; outSigma = Math.max(0.15, Math.abs(w) * inSigma3);
+      outFn = (x) => gauss(x, outMu, outSigma);
+    } else {
+      outMu = b; outSigma = Math.max(0.3, Math.abs(w) * inSigma3 * 0.8);
+      outFn = (x) => 0.5 * gauss(Math.abs(x - b) - Math.abs(w) * 2.2, 0, outSigma);
+    }
+    const [xMin, xMax] = fitRange([[inMu3, inSigma3], [targetM1, targetS], [targetM2, targetS], [outMu, outSigma + 2]]);
+    renderUatLine(w, b, xMin, xMax);
+    let svgHtml = drawAxes(xMin, xMax);
+    svgHtml += transformBanner(activationOn ? `Y = activation( ${w.toFixed(2)}·X + ${b.toFixed(1)} )` : `Y_pred = ${w.toFixed(2)}·X + ${b.toFixed(1)}`);
+    svgHtml += `<path d="${curvePath((x) => gauss(x, inMu3, inSigma3), YSCALE, xMin, xMax)}" fill="none" stroke="#0E7C7B" stroke-width="2"/>`;
+    svgHtml += `<path d="${curvePath((x) => bimodal(x, targetM1, targetM2, targetS), YSCALE, xMin, xMax)}" fill="none" stroke="#6C4AB6" stroke-width="2.5" stroke-dasharray="6,5"/>`;
+    svgHtml += filledArea(outFn, YSCALE, '#E4572E', 0.3, xMin, xMax);
+    svgHtml += `<path d="${curvePath(outFn, YSCALE, xMin, xMax)}" fill="none" stroke="#E4572E" stroke-width="2.5"/>`;
+    svgHtml += peakLabel('P(X) — input', inMu3, inSigma3, (x) => gauss(x, inMu3, inSigma3), YSCALE, '#0E7C7B', xMin, xMax);
+    svgHtml += peakLabel('target (2 humps)', targetM1, targetS, (x) => bimodal(x, targetM1, targetM2, targetS), YSCALE, '#6C4AB6', xMin, xMax);
+    svgHtml += peakLabel('your P(Y_pred)', outMu, outSigma, outFn, YSCALE, '#E4572E', xMin, xMax, 22);
+    document.getElementById('chartUat').innerHTML = svgHtml;
+    const verdict = document.getElementById('uatVerdict');
+    if (!activationOn) {
+      verdict.textContent = 'NO — always one hump';
+      verdict.className = 'val';
+    } else {
+      verdict.textContent = 'YES — two humps possible';
+      verdict.className = 'val good';
+    }
+  }
+  ['wUat', 'bUat'].forEach((id) => document.getElementById(id).addEventListener('input', renderUat));
+  document.getElementById('actToggle').addEventListener('click', function () {
+    activationOn = !activationOn;
+    this.classList.toggle('on', activationOn);
+    document.getElementById('noteUat').textContent = activationOn
+      ? "With a non-linear fold applied after the linear step, the SAME kind of building block can now produce two humps — this is the seed of why stacking Linear+activation, given enough units, can approximate any shape at all (Universal Approximation)."
+      : "The target this time is TWO-HUMPED (bimodal) — something a single linear transform can NEVER produce, no matter what W and b you pick, because scaling+shifting a bell curve always leaves it a single bell curve. Flip the activation toggle on and watch what becomes possible.";
+    renderUat();
+  });
+
+  // ---------- tabs ----------
+  document.querySelectorAll('.tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+    });
+  });
+
+  renderOne(); renderTwo(); renderUat();
+</script>
+
+</body>
+</html>
